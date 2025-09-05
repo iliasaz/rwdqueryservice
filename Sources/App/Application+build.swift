@@ -72,6 +72,14 @@ func buildRouter() throws -> Router<AppRequestContext> {
         // store request context in TaskLocal
         OpenAPIRequestContextMiddleware()
     }
+    
+    router.add(middleware: CORSMiddleware(
+        allowOrigin: .all,
+        allowHeaders: [.accept, .contentType, .authorization],
+        allowMethods: [.get, .post],
+        allowCredentials: true,
+        maxAge: .seconds(3600)
+    ))
         
     return router
 }
