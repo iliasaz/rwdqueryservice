@@ -15,7 +15,6 @@
 #       Stop all: docker-compose down (add -v to wipe db)
 #
 
-version: '3.7'
 
 #volumes:
 #  db_data:
