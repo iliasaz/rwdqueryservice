@@ -1,0 +1,227 @@
+openapi: '3.1.0'
+info:
+  title: RWD Query Service
+  version: 1.0.0
+servers:
+  - url: /
+    description: RWD Query Service
+paths:
+  /:
+    get:
+      operationId: getHello
+      responses:
+        '200':
+          description: Hello!
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /health:
+    get:
+      operationId: getHealth
+      responses:
+        '200':
+          description: ok
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /query:
+    post:
+      summary: Query patients by attributes and events
+      operationId: queryPatients
+      parameters:
+        - in: query
+          name: countOnly
+          schema:
+            type: boolean
+            default: true
+          description: If true, only return the count of matching patients. This is the default.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                attributes:
+                  type: object
+                  description: Timeless patient traits
+                  properties:
+                    allOf:
+                      type: array
+                      items: { $ref: '#/components/schemas/AttrVal' }
+                      description: Patients must have all of these attributes
+                    anyOf:
+                      type: array
+                      items: { $ref: '#/components/schemas/AttrVal' }
+                      description: Patients must have at least one of these attributes
+                    exclude:
+                      type: array
+                      items: { $ref: '#/components/schemas/AttrVal' }
+                      description: Patients must not have any of these attributes
+                events:
+                  type: object
+                  description: Event-based filters with optional time windows
+                  properties:
+                    allOf:
+                      type: array
+                      items: { $ref: '#/components/schemas/EventFilter' }
+                      description: Patients must have all of these events
+                    anyOf:
+                      type: array
+                      items: { $ref: '#/components/schemas/EventFilter' }
+                      description: Patients must have at least one of these events
+                    exclude:
+                      type: array
+                      items: { $ref: '#/components/schemas/EventFilter' }
+                      description: Patients must not have these events
+              additionalProperties: false
+      responses:
+        '200':
+          description: Query results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                    description: Number of matching patients
+                  patients:
+                    type: array
+                    description: List of matching patient IDs (omitted if countOnly=true)
+                    items:
+                      type: string
+
+  /attributes:
+    get:
+      summary: List available patient attributes
+      operationId: listAttributes
+      responses:
+        '200':
+          description: List of supported attributes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  enum: [gender, race, ethnicity, yearOfBirth, state, metro, urban]
+
+  /eventTypes:
+    get:
+      summary: List available patient event types
+      operationId: listEventTypes
+      responses:
+        '200':
+          description: List of supported event types
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  enum: [conditionCode, medicationCode, procedureCode]
+
+  /values/{attr}:
+    get:
+      summary: List available values for a given attribute
+      operationId: listAttributeValues
+      parameters:
+        - in: path
+          name: attr
+          required: true
+          schema:
+            type: string
+            enum: [gender, race, ethnicity, yearOfBirth, state, metro, urban]
+          description: Attribute name
+      responses:
+        '200':
+          description: List of available values for the specified attribute
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+
+components:
+  schemas:
+    AttrVal:
+      type: object
+      properties:
+        attr:
+          type: string
+          description: Attribute name
+          enum: [gender, race, ethnicity, yearOfBirth, state, metro, urban]
+        value:
+          type: string
+          description: Attribute value
+      required: [attr, value]
+
+    EventFilter:
+      type: object
+      properties:
+        attr:
+          type: string
+          description: Event type
+          enum: [conditionCode, medicationCode, procedureCode]
+        value:
+          type: string
+          description: Event code or value (supports wildcards like H91.1*)
+        start_yyyymm:
+          type: integer
+          description: Optional start date in yyyymm format (e.g., 202104)
+        end_yyyymm:
+          type: integer
+          description: Optional end date in yyyymm format (e.g., 202405)
+      required: [attr, value]
+      dependentRequired:
+        start_yyyymm: [end_yyyymm]
+        end_yyyymm: [start_yyyymm]
+      allOf:
+        - if:
+            properties:
+              start_yyyymm:
+                type: integer
+              end_yyyymm:
+                type: integer
+            required: [start_yyyymm, end_yyyymm]
+          then:
+            properties:
+              start_yyyymm:
+                type: integer
+                maximum: 999912
+              end_yyyymm:
+                type: integer
+                maximum: 999912
+            allOf:
+              - description: start_yyyymm must be <= end_yyyymm
+                properties:
+                  start_yyyymm: { type: integer }
+                  end_yyyymm: { type: integer }
+                required: [start_yyyymm, end_yyyymm]
+                not:
+                  properties:
+                    start_yyyymm:
+                      type: integer
+                    end_yyyymm:
+                      type: integer
+                  allOf:
+                    - properties:
+                        start_yyyymm:
+                          type: integer
+                        end_yyyymm:
+                          type: integer
+                      required: [start_yyyymm, end_yyyymm]
+                      description: Disallow start_yyyymm > end_yyyymm
+                      anyOf:
+                        - properties:
+                            start_yyyymm:
+                              maximum: 999912
+                            end_yyyymm:
+                              maximum: 999912
+                          required: [start_yyyymm, end_yyyymm]
