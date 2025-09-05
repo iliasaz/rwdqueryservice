@@ -16,17 +16,19 @@
 #
 
 
-#volumes:
+volumes:
 #  db_data:
+
 
 x-shared_environment: &shared_environment
   LOG_LEVEL: ${LOG_LEVEL:-debug}
+  INDEX_FILE_PATH: /app/data/prqt.rwdx
 
 services:
   app:
     image: rwdqueryservice:latest
-#    volumes:
-#      - /u01/app/config:/app/config
+    volumes:
+      - /home/ubuntu/data:/app/data
     build:
       context: .
     environment:
