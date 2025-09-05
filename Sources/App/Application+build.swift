@@ -72,12 +72,7 @@ func buildRouter() throws -> Router<AppRequestContext> {
         // store request context in TaskLocal
         OpenAPIRequestContextMiddleware()
     }
-    
-    // Serve openapi.yaml statically at /openapi.yaml
-    router.get("openapi.yaml") { request, context -> String in
-        try String(contentsOfFile: "Sources/AppAPI/openapi.yaml", encoding: .utf8)
-    }
-    
+        
     return router
 }
 
