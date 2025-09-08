@@ -4,8 +4,8 @@ import Logging
 import OpenAPIHummingbird
 
 /// Application arguments protocol. We use a protocol so we can call
-/// `buildApplication` inside Tests as well as in the App executable. 
-/// Any variables added here also have to be added to `App` in App.swift and 
+/// `buildApplication` inside Tests as well as in the App executable.
+/// Any variables added here also have to be added to `App` in App.swift and
 /// `TestArguments` in AppTest.swift
 public protocol AppArguments {
     var hostname: String { get }
@@ -26,9 +26,9 @@ public func buildApplication(_ arguments: some AppArguments) async throws -> som
     let environment = Environment()
     let logger = {
         var logger = Logger(label: "rwdqueryservice")
-        logger.logLevel = 
-            arguments.logLevel ??
-            environment.get("LOG_LEVEL").flatMap { Logger.Level(rawValue: $0) } ??
+        logger.logLevel =
+        arguments.logLevel ??
+        environment.get("LOG_LEVEL").flatMap { Logger.Level(rawValue: $0) } ??
             .info
         return logger
     }()
@@ -48,7 +48,7 @@ public func buildApplication(_ arguments: some AppArguments) async throws -> som
     // Register Query Engine and add OpenAPI handlers
     let api = APIImplementation(queryEngine: queryEngine)
     try api.registerHandlers(on: router)
-
+    
     let app = Application(
         router: router,
         configuration: .init(
@@ -69,18 +69,22 @@ func buildRouter() throws -> Router<AppRequestContext> {
         LogRequestsMiddleware(.info)
         // static files
         FileMiddleware("public/swagger-ui", urlBasePath: "/docs", searchForIndexHtml: true)
+        // CORS
+        CORSMiddleware(
+            allowOrigin: .all,
+            allowHeaders: [.accept, .contentType, .authorization],
+            allowMethods: [.get, .post],
+            allowCredentials: true,
+            maxAge: .seconds(3600)
+        )
         // store request context in TaskLocal
         OpenAPIRequestContextMiddleware()
     }
     
-    router.add(middleware: CORSMiddleware(
-        allowOrigin: .all,
-        allowHeaders: [.accept, .contentType, .authorization],
-        allowMethods: [.get, .post],
-        allowCredentials: true,
-        maxAge: .seconds(3600)
-    ))
-        
+    router.get("/") { request, context -> Response in
+        // This will redirect to "/docs/" with a 308 Permanent Redirect status
+        return Response.redirect(to: "/docs/", type: .permanent)
+    }
+    
     return router
 }
-
