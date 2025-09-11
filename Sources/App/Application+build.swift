@@ -18,6 +18,7 @@ typealias AppRequestContext = BasicRequestContext
 
 enum AppErrors: Error {
     case invalidIndexFilePath
+    case invalidOpenAIKeyPath
 }
 
 ///  Build application
@@ -45,8 +46,18 @@ public func buildApplication(_ arguments: some AppArguments) async throws -> som
     try queryEngine.loadIndex(from: indexFileUrl)
     logger.info("Loading index complete")
     
-    // Register Query Engine and add OpenAPI handlers
-    let api = APIImplementation(queryEngine: queryEngine)
+    // add Agent
+    let openaiApiKey: String
+    if let envOpenaiKey = environment.get("OPENAI_API_KEY") {
+        openaiApiKey = envOpenaiKey
+    } else {
+        logger.error("OPENAI_API_KEY environment variable not found")
+         openaiApiKey = "<not used>"
+//        throw AppErrors.invalidOpenAIKeyPath
+    }
+    
+    // Register Query Engine, Agent, and add OpenAPI handlers
+    let api = APIImplementation(queryEngine: queryEngine, openaiKey: openaiApiKey, logger: logger)
     try api.registerHandlers(on: router)
     
     let app = Application(
