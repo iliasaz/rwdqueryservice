@@ -9,8 +9,6 @@ import Foundation
 import Logging
 import AppAPI
 
-typealias Attribute = AppAPI.Operations.ListAttributeValues.Input.Path.AttrPayload
-
 class QueryEngine: @unchecked Sendable {
     let index = PeopleIndex()
     let dict = DictionaryEncoder()
@@ -72,63 +70,208 @@ class QueryEngine: @unchecked Sendable {
         }
     }
     
-    // Helper function to convert event filters to [AttrVal] and [AttrValYear]
-    func convertEventFilters(_ filters: [Components.Schemas.EventFilter]) -> (vals: [AttrVal], years: [AttrValYear]) {
-        var vals: [AttrVal] = []
+    struct EventFilterGroup {
+        var values: [AttrVal] = []
         var years: [AttrValYear] = []
+        var isEmpty: Bool { values.isEmpty && years.isEmpty }
+    }
+    
+    func convertEventFilters(_ filters: [Components.Schemas.EventFilter]) -> [EventFilterGroup] {
+        var groups: [EventFilterGroup] = []
+        groups.reserveCapacity(filters.count)
         
         for filter in filters {
             let attrKey = filter.attr.rawValue
             guard let attrId = dict.attrToID[attrKey] else { continue }
+            var group = EventFilterGroup()
             
+            // Determine code expansion
             if filter.value.contains("*") {
-                let expandedVals = dict.makeAttrVals(attr: attrKey, pattern: filter.value)
+                let expandedVals = dict.makeAttrVals(attr: attrKey, pattern: filter.value) // returns [AttrVal]
                 if let start = filter.startYyyymm, let end = filter.endYyyymm {
-                    let expandedMonths = expandMonthRange(from: start, to: end)
-                    for val in expandedVals {
-                        years.append(contentsOf: makeAttrValYears(attrId: attrId, val: val.val, months: expandedMonths))
+                    // OR all months across all expanded codes (as years terms)
+                    let months = expandMonthRange(from: start, to: end)
+                    for av in expandedVals {
+                        group.years.append(contentsOf: makeAttrValYears(attrId: av.attr, val: av.val, months: months))
                     }
                 } else {
-                    vals.append(contentsOf: expandedVals)
+                    // OR all expanded codes at timeless level
+                    group.values.append(contentsOf: expandedVals)
                 }
-            } else if let start = filter.startYyyymm, let end = filter.endYyyymm,
-                      let valId = dict.valueToID[attrId]?[filter.value] {
-                let expanded = expandMonthRange(from: start, to: end)
-                years.append(contentsOf: makeAttrValYears(attrId: attrId, val: valId, months: expanded))
-            } else if let valId = dict.valueToID[attrId]?[filter.value] {
-                vals.append(AttrVal(attr: attrId, val: valId))
+            } else {
+                // Exact code
+                if let valId = dict.valueToID[attrId]?[filter.value] {
+                    if let start = filter.startYyyymm, let end = filter.endYyyymm {
+                        let months = expandMonthRange(from: start, to: end)
+                        group.years.append(contentsOf: makeAttrValYears(attrId: attrId, val: valId, months: months))
+                    } else {
+                        group.values.append(AttrVal(attr: attrId, val: valId))
+                    }
+                }
             }
+            
+            if !group.isEmpty { groups.append(group) }
         }
-        return (vals, years)
+        
+        return groups
+    }
+    
+    
+    private func unionPostings(_ postings: [Posting]) -> Posting? {
+        guard var acc = postings.first else { return nil }
+        for i in 1..<postings.count {
+            acc = acc.union(postings[i])
+        }
+        return acc
+    }
+    
+    private func intersectPostings(_ postings: [Posting]) -> Posting? {
+        guard !postings.isEmpty else { return nil }
+        let sorted = postings.sorted { $0.count < $1.count }
+        var acc = sorted[0]
+        for i in 1..<sorted.count {
+            acc = acc.intersect(sorted[i])
+            if acc.isEmpty { return acc }
+        }
+        return acc
+    }
+    
+    private func postingFor(values: [AttrVal]) -> Posting? {
+        var acc: Posting? = nil
+        for v in values {
+            guard let s = index.postingsValue[v], !s.isEmpty else { continue }
+            let p = Posting(array: s.toArray())
+            acc = (acc == nil) ? p : acc!.union(p)
+        }
+        return acc
+    }
+    
+    private func postingFor(years: [AttrValYear]) -> Posting? {
+        var acc: Posting? = nil
+        for y in years {
+            guard let s = index.postingsYear[y], !s.isEmpty else { continue }
+            let p = Posting(array: s.toArray())
+            acc = (acc == nil) ? p : acc!.union(p)
+        }
+        return acc
+    }
+    
+    private func postingFor(group: EventFilterGroup) -> Posting? {
+        let pv = postingFor(values: group.values)
+        let py = postingFor(years: group.years)
+        switch (pv, py) {
+            case (nil, nil): return nil
+            case (let p?, nil): return p
+            case (nil, let p?): return p
+            case (let p1?, let p2?): return p1.union(p2)
+        }
     }
     
     func queryFromPayload(queryRequest: Components.Schemas.QueryRequest, countOnly: Bool) -> Components.Schemas.QueryResults {
-        // Extract attribute filters
+        // Attributes → timeless
         let attrAllOf = convertAttrFilters(queryRequest.attributes?.allOf ?? [])
         let attrAnyOf = convertAttrFilters(queryRequest.attributes?.anyOf ?? [])
         let attrExclude = convertAttrFilters(queryRequest.attributes?.exclude ?? [])
         
-        // Extract event filters
-        let (eventAllOfVals, eventAllOfYears) = convertEventFilters(queryRequest.events?.allOf ?? [])
-        let (eventAnyOfVals, eventAnyOfYears) = convertEventFilters(queryRequest.events?.anyOf ?? [])
-        let (eventExcludeVals, eventExcludeYears) = convertEventFilters(queryRequest.events?.exclude ?? [])
+        // Events → grouped by filter (OR inside each group)
+        let eventAllOfGroups = convertEventFilters(queryRequest.events?.allOf ?? [])
+        let eventAnyOfGroups = convertEventFilters(queryRequest.events?.anyOf ?? [])
+        let eventExcludeGroups = convertEventFilters(queryRequest.events?.exclude ?? [])
         
-        // Query the index
-        let result = index.query(
-            attrAllOf: attrAllOf,
-            attrAnyOf: attrAnyOf,
-            attrExclude: attrExclude,
-            eventAllOf: eventAllOfVals,
-            eventAnyOf: eventAnyOfVals,
-            eventExclude: eventExcludeVals,
-            eventAllOfYears: eventAllOfYears,
-            eventAnyOfYears: eventAnyOfYears,
-            eventExcludeYears: eventExcludeYears
-        )
+        // Build postings for attributes and events
+        var acc: Posting? = nil
         
-        let count = result.count
-        let patients = countOnly ? nil : Array(result).map { dict.personIndexToGuid[Int($0)] }
+        if !attrAllOf.isEmpty {
+            var andPostings: [Posting] = []
+            andPostings.reserveCapacity(attrAllOf.count)
+            for v in attrAllOf {
+                if let s = index.postingsValue[v], !s.isEmpty {
+                    andPostings.append(Posting(array: s.toArray()))
+                } else {
+                    return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [])
+                }
+            }
+            if let andPosting = intersectPostings(andPostings) {
+                acc = (acc == nil) ? andPosting : acc!.intersect(andPosting)
+                if acc!.isEmpty {
+                    return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [])
+                }
+            }
+        }
         
+        if !eventAllOfGroups.isEmpty {
+            var groupPostings: [Posting] = []
+            groupPostings.reserveCapacity(eventAllOfGroups.count)
+            for g in eventAllOfGroups {
+                if let pg = postingFor(group: g) {
+                    groupPostings.append(pg)
+                } else {
+                    return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [])
+                }
+            }
+            if let allEventPosting = intersectPostings(groupPostings) {
+                acc = (acc == nil) ? allEventPosting : acc!.intersect(allEventPosting)
+                if acc!.isEmpty {
+                    return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [])
+                }
+            }
+        }
+        
+        if let anyAttrPosting = postingFor(values: attrAnyOf) {
+            acc = (acc == nil) ? anyAttrPosting : acc!.intersect(anyAttrPosting)
+            if acc!.isEmpty {
+                return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [])
+            }
+        }
+        
+        if !eventAnyOfGroups.isEmpty {
+            var groupPostings: [Posting] = []
+            for g in eventAnyOfGroups {
+                if let pg = postingFor(group: g) {
+                    groupPostings.append(pg)
+                }
+            }
+            if let anyEventPosting = unionPostings(groupPostings) {
+                acc = (acc == nil) ? anyEventPosting : acc!.intersect(anyEventPosting)
+                if acc!.isEmpty {
+                    return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [])
+                }
+            }
+        }
+        
+        // exclude (attributes + events): OR all exclusions then subtract once
+        var neg: Posting? = nil
+        
+        if let attrNeg = postingFor(values: attrExclude) {
+            neg = attrNeg
+        }
+        if !eventExcludeGroups.isEmpty {
+            var negGroups: [Posting] = []
+            for g in eventExcludeGroups {
+                if let pg = postingFor(group: g) {
+                    negGroups.append(pg)
+                }
+            }
+            if let evtNeg = unionPostings(negGroups) {
+                neg = (neg == nil) ? evtNeg : neg!.union(evtNeg)
+            }
+        }
+        
+        if let neg, let acc0 = acc {
+            acc = acc0.subtract(neg)
+            if acc!.isEmpty {
+                return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [])
+            }
+        }
+        
+        // If no positive criteria produced an accumulator, return empty set
+        guard let final = acc else {
+            return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [])
+        }
+        
+        let ids = final.toArray()
+        let count = ids.count
+        let patients = countOnly ? nil : ids.map { dict.personIndexToGuid[Int($0)] }
         return Components.Schemas.QueryResults(count: count, patients: patients)
     }
 }

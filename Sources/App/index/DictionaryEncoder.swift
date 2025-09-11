@@ -10,7 +10,7 @@ import Foundation
 // Simple dictionary-encoder (unchanged)
 public final class DictionaryEncoder {
     private(set) var attrToID: [String: Int] = [:]
-    private(set) var valueToID: [Int: [String: Int]] = [:]
+    private(set) var valueToID: [Int: [String: Int]] = [:] // [attrID: [valueString: valueID]]
     private var nextAttrID = 0
 
     // === Person dictionary (external GUID <-> internal PersonID) ===

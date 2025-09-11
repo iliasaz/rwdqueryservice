@@ -295,7 +295,8 @@ components:
 
     EventFilter:
       type: object
-      description: Event filter specifying an event type, value, and optional time window.
+      description: >
+        Event filter specifying an event type, value, and optional time window. For example, attr: {type: conditionCode, value: E11.*, startYyyymm: 202104, endYyyymm: 202212}
       properties:
         attr:
           type: string
@@ -306,10 +307,10 @@ components:
           description: Event code or value (supports wildcards like H91.1*).
         start_yyyymm:
           type: integer
-          description: Optional start date in yyyymm format (e.g., 202104).
+          description: Start of the date range for Event search in yyyymm format (e.g., 202104).
         end_yyyymm:
           type: integer
-          description: Optional end date in yyyymm format (e.g., 202405).
+          description: End of the date range for Event search in yyyymm format (e.g., 202212).
       required: [attr, value]
       dependentRequired:
         start_yyyymm: [end_yyyymm]

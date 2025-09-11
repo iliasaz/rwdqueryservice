@@ -16,8 +16,10 @@ extension DictionaryEncoder {
               let vmap = valueToID[aid] else { return [] }
 
         // Case 1: pattern = "*" → everything
+        // we don't want this because it's too expensive to iterate over all values
         if pattern == "*" {
-            return vmap.map { (valStr, vid) in AttrVal(attr: aid, val: vid) }
+//            return vmap.map { (valStr, vid) in AttrVal(attr: aid, val: vid) }
+            return []
         }
 
         // Case 2: prefix match "foo*"

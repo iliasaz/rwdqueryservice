@@ -1,10 +1,13 @@
 import AppAPI
 import OpenAPIRuntime
 import Foundation
+import Logging
 
 // MARK: Implementation of API handlers
 struct APIImplementation: APIProtocol {
     let queryEngine: QueryEngine
+    let openaiKey: String
+    let logger: Logger
     
     /// /values/{attr}
     func listAttributeValues(_ input: AppAPI.Operations.ListAttributeValues.Input) async throws -> AppAPI.Operations.ListAttributeValues.Output {
@@ -44,42 +47,18 @@ struct APIImplementation: APIProtocol {
         }
     }
     
+    /// /ask
     func ask(_ input: AppAPI.Operations.Ask.Input) async throws -> AppAPI.Operations.Ask.Output {
         let conversationId = "mock-conversation-001"
-        
-        let proposedQuery = Components.Schemas.QueryRequest(
-            attributes: Components.Schemas.AttributeFilters(
-                allOf: [
-                    Components.Schemas.AttrVal(attr: .gender, value: "Male"),
-                    Components.Schemas.AttrVal(attr: .race, value: "Black or African American")
-                ]
-            ),
-            events: Components.Schemas.EventFilters(
-                anyOf: [
-                    Components.Schemas.EventFilter(attr: .conditionCode, value: "E11", startYyyymm: 202201, endYyyymm: 202412)
-                ]
-            )
-        )
-        
-        let queryResults = Components.Schemas.QueryResults(
-            count: 4,
-            patients: ["patientA", "patientB", "patientC", "patientD"]
-        )
-        
-        let message = Components.Schemas.Message(
-            role: .agent,
-            content: "Here are black male patients with Type 2 diabetes mellitus in 2022.",
-            proposedQuery: proposedQuery,
-            queryResults: queryResults
-        )
-        
-        let responseBody = AppAPI.Operations.Ask.Output.Ok.Body.JsonPayload(
-            conversationId: conversationId,
-            message: message
-        )
-        return .ok(.init(body: .json(responseBody)))
+        let body = input.body
+        switch body {
+            case .json(let payload):
+                let messages = payload.context
+                let agent = Agent(apiKey: openaiKey, queryEngine: queryEngine, logger: logger)
+                let agentResponse = try await agent.ask(context: messages)
+                return .ok(.init(body: .json(AppAPI.Operations.Ask.Output.Ok.Body.JsonPayload(message: agentResponse))))
+        }
     }
-    
     
     /// /health
     func getHealth(_ input: AppAPI.Operations.GetHealth.Input) async throws -> AppAPI.Operations.GetHealth.Output {
