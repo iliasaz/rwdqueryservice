@@ -251,6 +251,76 @@ paths:
                     code: "InvalidRequest"
                     message: "Missing required field 'attributes' or 'events'"
 
+  /events/search:
+    get:
+      summary: Search event codes
+      description: >
+        Search event code values (conditionCode, medicationCode, or procedureCode) for type-ahead suggestions.
+      operationId: searchEvents
+      parameters:
+        - in: query
+          name: eventType
+          required: true
+          schema:
+            type: string
+            enum: [conditionCode, medicationCode, procedureCode]
+          description: Event type to search values for.
+          example: conditionCode
+        - in: query
+          name: keyword
+          required: true
+          schema:
+            type: string
+            minLength: 1
+          description: Case-insensitive search keyword.
+          example: E11
+        - in: query
+          name: match
+          schema:
+            type: string
+            enum: [prefix, contains]
+            default: prefix
+          description: >
+            Match mode. 'prefix' matches values that start with keyword. 'contains'
+            returns prefix matches first then substring matches.
+          example: contains
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Maximum number of results to return.
+          example: 10
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of results to skip (for paging).
+          example: 0
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  values:
+                    type: array
+                    items:
+                      type: string
+                  total:
+                    type: integer
+                required: [values, total]
+              examples:
+                example:
+                  value:
+                    values: ["E11", "E110"]
+                    total: 1234
 components:
   schemas:
     AttributeFilters:
