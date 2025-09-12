@@ -207,6 +207,33 @@ paths:
                   context:
                     - role: user
                       content: "Show me black male patients dx with type 2 diabetes from jan 2021 to apr 2022"
+              askMultiTurnExample:
+                summary: Multi-turn refinement
+                value:
+                  conversationId: "conv-456"
+                  context:
+                    - role: user
+                      content: "Show me male patients with hypertension from 2020 to 2022"
+                    - role: agent
+                      content: |
+                        Result: 1 male patient with a hypertension diagnosis (I10) between 2020-01 and 2022-12.
+
+                        Would you like to refine?
+                        - Option A: Broaden conditionCode to include I10–I15 to capture all hypertension-related diagnoses during 2020–2022.
+                        - Option B: Add an attribute filter such as state, metro/urban, race/ethnicity, or a yearOfBirth range to focus the cohort.
+
+                        Shall I proceed with either option, or do you need something else?
+                      proposedQuery:
+                        attributes:
+                          allOf:
+                            - { attr: gender, value: Male }
+                        events:
+                          allOf:
+                            - { attr: conditionCode, value: I10.*, startYYYYMM: 202001, endYYYYMM: 202212 }
+                      queryResults:
+                        count: 1
+                    - role: user
+                      content: "expand the search to include I11.*, I15.*"
       responses:
         '200':
           description: Agent response
