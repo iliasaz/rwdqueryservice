@@ -274,6 +274,43 @@ class QueryEngine: @unchecked Sendable {
         let patients = countOnly ? nil : ids.map { dict.personIndexToGuid[Int($0)] }
         return Components.Schemas.QueryResults(count: count, patients: patients)
     }
+
+    // Search event code values for type-ahead suggestions
+    // - eventType: "conditionCode" | "medicationCode" | "procedureCode"
+    // - matchMode: "prefix" (default) or "contains"
+    // Returns paged values and total matching count.
+    func searchEventValues(eventType: String, keyword: String, matchMode: String = "prefix", limit: Int = 20, offset: Int = 0) -> (values: [String], total: Int) {
+        let key = keyword.lowercased()
+        guard !key.isEmpty,
+              let attrId = dict.attrToID[eventType],
+              let vmap = dict.valueToID[attrId] else {
+            return ([], 0)
+        }
+
+        // Compute matches with required ordering
+        let allValues = Array(vmap.keys)
+        let prefixMatches = allValues.filter { $0.lowercased().hasPrefix(key) }.sorted()
+
+        let matches: [String]
+        if matchMode == "contains" {
+            let substrMatches = allValues.filter { val in
+                let lower = val.lowercased()
+                return lower.contains(key) && !lower.hasPrefix(key)
+            }.sorted()
+            matches = prefixMatches + substrMatches
+        } else {
+            matches = prefixMatches
+        }
+
+        // Paging
+        let total = matches.count
+        let safeLimit = max(1, min(limit, 100))
+        let safeOffset = max(0, offset)
+        let start = min(safeOffset, total)
+        let end = min(start + safeLimit, total)
+        let page = (start < end) ? Array(matches[start..<end]) : []
+        return (page, total)
+    }
 }
 
 extension PeopleIndex {

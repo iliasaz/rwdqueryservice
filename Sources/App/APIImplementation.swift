@@ -64,4 +64,25 @@ struct APIImplementation: APIProtocol {
     func getHealth(_ input: AppAPI.Operations.GetHealth.Input) async throws -> AppAPI.Operations.GetHealth.Output {
         return .ok(.init(body: .plainText("ok")))
     }
+
+    /// /events/search
+    func searchEvents(_ input: AppAPI.Operations.SearchEvents.Input) async throws -> AppAPI.Operations.SearchEvents.Output {
+        // Extract query params with defaults
+        let eventType = input.query.eventType.rawValue
+        let matchMode = input.query.match?.rawValue ?? "prefix"
+        let limit = max(1, min(input.query.limit ?? 20, 100))
+        let offset = max(0, input.query.offset ?? 0)
+        let keyword = input.query.keyword
+
+        let (values, total) = queryEngine.searchEventValues(
+            eventType: eventType,
+            keyword: keyword,
+            matchMode: matchMode,
+            limit: limit,
+            offset: offset
+        )
+        let response = AppAPI.Operations.SearchEvents.Output.Ok.Body.JsonPayload(values: values, total: total)
+        return .ok(.init(body: .json(response)))
+    }
+
 }
