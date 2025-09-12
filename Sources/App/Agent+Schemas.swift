@@ -30,114 +30,114 @@ func derivedQueryRequestSchemaJSONString(prettyPrinted: Bool = true) throws -> S
     return String(decoding: data, as: UTF8.self)
 }
 
-let queryRequestJsonSchemaString = """
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "QueryRequest",
-  "type": "object",
-  "description": "Structured query specifying attribute and event filters.",
-  "properties": {
-    "attributes": {
-      "type": "object",
-      "description": "Timeless patient attribute filters.",
-      "properties": {
-        "allOf": {
-          "type": "array",
-          "description": "Patients must have all of these attributes.",
-          "items": {
-            "type": "object",
-            "description": "Attribute filter specifying an attribute-value pair.",
-            "properties": {
-              "attr": {
-                "type": "string",
-                "enum": [
-                  "gender",
-                  "race",
-                  "ethnicity",
-                  "yearOfBirth",
-                  "state",
-                  "metro",
-                  "urban"
-                ]
-              },
-              "value": {
-                "type": "string",
-                "description": "Attribute value."
-              }
-            },
-            "required": ["attr", "value"]
-          }
-        },
-        "anyOf": {
-          "type": "array",
-          "description": "Patients must have at least one of these attributes.",
-          "items": {
-            "$ref": "#/properties/attributes/properties/allOf/items"
-          }
-        },
-        "exclude": {
-          "type": "array",
-          "description": "Patients must not have any of these attributes.",
-          "items": {
-            "$ref": "#/properties/attributes/properties/allOf/items"
-          }
-        }
-      }
-    },
-    "events": {
-      "type": "object",
-      "description": "Event filters with optional time windows.",
-      "properties": {
-        "allOf": {
-          "type": "array",
-          "description": "Patients must have all of these events.",
-          "items": {
-            "type": "object",
-            "description": "Event filter specifying an event type, value, and optional time window.",
-            "properties": {
-              "attr": {
-                "type": "string",
-                "enum": ["conditionCode", "medicationCode", "procedureCode"]
-              },
-              "value": {
-                "type": "string",
-                "description": "Event code or value (supports wildcards like H91.1*)."
-              },
-              "start_yyyymm": {
-                "type": "integer",
-                "description": "Optional start date in yyyymm format (e.g., 202104)."
-              },
-              "end_yyyymm": {
-                "type": "integer",
-                "description": "Optional end date in yyyymm format (e.g., 202405)."
-              }
-            },
-            "required": ["attr", "value"],
-            "dependentRequired": {
-              "start_yyyymm": ["end_yyyymm"],
-              "end_yyyymm": ["start_yyyymm"]
-            }
-          }
-        },
-        "anyOf": {
-          "type": "array",
-          "description": "Patients must have at least one of these events.",
-          "items": {
-            "$ref": "#/properties/events/properties/allOf/items"
-          }
-        },
-        "exclude": {
-          "type": "array",
-          "description": "Patients must not have any of these events.",
-          "items": {
-            "$ref": "#/properties/events/properties/allOf/items"
-          }
-        }
-      }
-    }
-  }
-}
-"""
+//let queryRequestJsonSchemaString = """
+//{
+//  "$schema": "https://json-schema.org/draft/2020-12/schema",
+//  "title": "QueryRequest",
+//  "type": "object",
+//  "description": "Structured query specifying attribute and event filters.",
+//  "properties": {
+//    "attributes": {
+//      "type": "object",
+//      "description": "Timeless patient attribute filters.",
+//      "properties": {
+//        "allOf": {
+//          "type": "array",
+//          "description": "Patients must have all of these attributes.",
+//          "items": {
+//            "type": "object",
+//            "description": "Attribute filter specifying an attribute-value pair.",
+//            "properties": {
+//              "attr": {
+//                "type": "string",
+//                "enum": [
+//                  "gender",
+//                  "race",
+//                  "ethnicity",
+//                  "yearOfBirth",
+//                  "state",
+//                  "metro",
+//                  "urban"
+//                ]
+//              },
+//              "value": {
+//                "type": "string",
+//                "description": "Attribute value."
+//              }
+//            },
+//            "required": ["attr", "value"]
+//          }
+//        },
+//        "anyOf": {
+//          "type": "array",
+//          "description": "Patients must have at least one of these attributes.",
+//          "items": {
+//            "$ref": "#/properties/attributes/properties/allOf/items"
+//          }
+//        },
+//        "exclude": {
+//          "type": "array",
+//          "description": "Patients must not have any of these attributes.",
+//          "items": {
+//            "$ref": "#/properties/attributes/properties/allOf/items"
+//          }
+//        }
+//      }
+//    },
+//    "events": {
+//      "type": "object",
+//      "description": "Event filters with optional time windows.",
+//      "properties": {
+//        "allOf": {
+//          "type": "array",
+//          "description": "Patients must have all of these events.",
+//          "items": {
+//            "type": "object",
+//            "description": "Event filter specifying an event type, value, and optional time window.",
+//            "properties": {
+//              "attr": {
+//                "type": "string",
+//                "enum": ["conditionCode", "medicationCode", "procedureCode"]
+//              },
+//              "value": {
+//                "type": "string",
+//                "description": "Event code or value (supports wildcards like H91.1*)."
+//              },
+//              "start_yyyymm": {
+//                "type": "integer",
+//                "description": "Optional start date in yyyymm format (e.g., 202104)."
+//              },
+//              "end_yyyymm": {
+//                "type": "integer",
+//                "description": "Optional end date in yyyymm format (e.g., 202405)."
+//              }
+//            },
+//            "required": ["attr", "value"],
+//            "dependentRequired": {
+//              "start_yyyymm": ["end_yyyymm"],
+//              "end_yyyymm": ["start_yyyymm"]
+//            }
+//          }
+//        },
+//        "anyOf": {
+//          "type": "array",
+//          "description": "Patients must have at least one of these events.",
+//          "items": {
+//            "$ref": "#/properties/events/properties/allOf/items"
+//          }
+//        },
+//        "exclude": {
+//          "type": "array",
+//          "description": "Patients must not have any of these events.",
+//          "items": {
+//            "$ref": "#/properties/events/properties/allOf/items"
+//          }
+//        }
+//      }
+//    }
+//  }
+//}
+//"""
 
 func getQueryRequestSchema(from jsonSchemaString: String) throws -> JSONSchema {
     let data = Data(jsonSchemaString.utf8)
@@ -163,34 +163,43 @@ extension AppAPI.Components.Schemas.QueryRequest: JSONSchemaConvertible {
             anyOf: attrAnyOf,
             exclude: attrExclude
         )
-
+        
         // Use a canonical full-range window for items that previously omitted dates,
         // so no optionals are nil in the example.
         let fullRangeStart = 200001
         let fullRangeEnd = 209912
-
+        
         let eventsAnyOf: [AppAPI.Components.Schemas.EventFilter] = [
-            .init(attr: .conditionCode, value: "E11.*", startYyyymm: fullRangeStart, endYyyymm: fullRangeEnd),
-            .init(attr: .procedureCode, value: "0TY00Z0", startYyyymm: fullRangeStart, endYyyymm: fullRangeEnd)
+            .init(attr: .conditionCode, value: "E11.*", startYYYYMM: 202101, endYYYYMM: 202512),
+            .init(attr: .procedureCode, value: "0TY00Z0", startYYYYMM: fullRangeStart, endYYYYMM: fullRangeEnd)
         ]
-
+        
         let eventsAllOf: [AppAPI.Components.Schemas.EventFilter] = [
-            .init(attr: .medicationCode, value: "LENVATINIB", startYyyymm: 202001, endYyyymm: 202312),
-            .init(attr: .conditionCode, value: "I10.*", startYyyymm: fullRangeStart, endYyyymm: fullRangeEnd)
+            .init(attr: .medicationCode, value: "LENVATINIB", startYYYYMM: 202001, endYYYYMM: 202312),
+            .init(attr: .conditionCode, value: "I10.*", startYYYYMM: fullRangeStart, endYYYYMM: fullRangeEnd)
         ]
-
+        
         let eventsExclude: [AppAPI.Components.Schemas.EventFilter] = [
-            .init(attr: .conditionCode, value: "C50.*", startYyyymm: fullRangeStart, endYyyymm: fullRangeEnd),
-            .init(attr: .procedureCode, value: "30233N1", startYyyymm: 201001, endYyyymm: 201512)
+            .init(attr: .conditionCode, value: "C50.*", startYYYYMM: fullRangeStart, endYYYYMM: fullRangeEnd),
+            .init(attr: .procedureCode, value: "30233N1", startYYYYMM: 201001, endYYYYMM: 201512)
         ]
-
+        
         let events = AppAPI.Components.Schemas.EventFilters(
             allOf: eventsAllOf,
             anyOf: eventsAnyOf,
             exclude: eventsExclude
         )
-
+        
         return .init(attributes: attributes, events: events)
+    }
+    
+    static func exampleString() -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        if let data = try? encoder.encode(Self.example) {
+            return String(decoding: data, as: UTF8.self)
+        }
+        return "{}"
     }
 }
 
@@ -224,8 +233,8 @@ let queryRequestExample = """
       {
         "attr": "medicationCode",
         "value": "LENVATINIB",
-        "start_yyyymm": 202001,
-        "end_yyyymm": 202312
+        "startYYYYMM": 202001,
+        "endYYYYMM": 202312
       },
       {
         "attr": "conditionCode",
@@ -240,8 +249,8 @@ let queryRequestExample = """
       {
         "attr": "procedureCode",
         "value": "30233N1", 
-        "start_yyyymm": 201001,
-        "end_yyyymm": 201512
+        "startYYYYMM": 201001,
+        "endYYYYMM": 201512
       }
     ]
   }
@@ -252,11 +261,11 @@ let queryRequestExample = """
 private func enrichQueryRequestDescriptions(fromOpenAPI schema: JSONSchema) throws -> JSONSchema {
     guard case var .object(root) = schema else { return schema }
     guard let openAPI = try loadOpenAPIObject() else { return schema }
-
+    
     func desc(_ path: [String]) -> String? {
         value(at: path, in: openAPI) as? String
     }
-
+    
     if let rootTitle = value(at: ["components","schemas","QueryRequest","title"], in: openAPI) as? String {
         setKey(in: &root, path: [], key: "title", value: AnyJSONDocument(rootTitle))
     }
@@ -268,7 +277,7 @@ private func enrichQueryRequestDescriptions(fromOpenAPI schema: JSONSchema) thro
     if let rootDescription = desc(["components","schemas","QueryRequest","description"]) {
         setDescription(in: &root, path: [], description: rootDescription)
     }
-
+    
     if let attributesDesc = desc(["components","schemas","AttributeFilters","description"]) {
         setDescription(in: &root, path: ["properties","attributes"], description: attributesDesc)
     }
@@ -281,7 +290,7 @@ private func enrichQueryRequestDescriptions(fromOpenAPI schema: JSONSchema) thro
     if let attrExcludeDesc = desc(["components","schemas","AttributeFilters","properties","exclude","description"]) {
         setDescription(in: &root, path: ["properties","attributes","properties","exclude"], description: attrExcludeDesc)
     }
-
+    
     if let attrItemDesc = desc(["components","schemas","AttrVal","description"]) ?? desc(["components","schemas","AttributeFilters","properties","allOf","items","description"]) {
         setDescription(in: &root, path: ["properties","attributes","properties","allOf","items"], description: attrItemDesc)
         setDescription(in: &root, path: ["properties","attributes","properties","anyOf","items"], description: attrItemDesc)
@@ -297,7 +306,7 @@ private func enrichQueryRequestDescriptions(fromOpenAPI schema: JSONSchema) thro
         setDescription(in: &root, path: ["properties","attributes","properties","anyOf","items","properties","value"], description: attrValueDesc)
         setDescription(in: &root, path: ["properties","attributes","properties","exclude","items","properties","value"], description: attrValueDesc)
     }
-
+    
     if let eventsDesc = desc(["components","schemas","EventFilters","description"]) {
         setDescription(in: &root, path: ["properties","events"], description: eventsDesc)
     }
@@ -310,7 +319,7 @@ private func enrichQueryRequestDescriptions(fromOpenAPI schema: JSONSchema) thro
     if let evtExcludeDesc = desc(["components","schemas","EventFilters","properties","exclude","description"]) {
         setDescription(in: &root, path: ["properties","events","properties","exclude"], description: evtExcludeDesc)
     }
-
+    
     if let eventFilterItemDesc = desc(["components","schemas","EventFilter","description"]) ?? desc(["components","schemas","EventFilters","properties","allOf","items","description"]) {
         setDescription(in: &root, path: ["properties","events","properties","allOf","items"], description: eventFilterItemDesc)
         setDescription(in: &root, path: ["properties","events","properties","anyOf","items"], description: eventFilterItemDesc)
@@ -327,16 +336,16 @@ private func enrichQueryRequestDescriptions(fromOpenAPI schema: JSONSchema) thro
         setDescription(in: &root, path: ["properties","events","properties","exclude","items","properties","value"], description: evtValueDesc)
     }
     if let startDesc = desc(["components","schemas","EventFilter","properties","start_yyyymm","description"]) {
-        setDescription(in: &root, path: ["properties","events","properties","allOf","items","properties","startYyyymm"], description: startDesc)
-        setDescription(in: &root, path: ["properties","events","properties","anyOf","items","properties","startYyyymm"], description: startDesc)
-        setDescription(in: &root, path: ["properties","events","properties","exclude","items","properties","startYyyymm"], description: startDesc)
+        setDescription(in: &root, path: ["properties","events","properties","allOf","items","properties","startYYYYMM"], description: startDesc)
+        setDescription(in: &root, path: ["properties","events","properties","anyOf","items","properties","startYYYYMM"], description: startDesc)
+        setDescription(in: &root, path: ["properties","events","properties","exclude","items","properties","startYYYYMM"], description: startDesc)
     }
     if let endDesc = desc(["components","schemas","EventFilter","properties","end_yyyymm","description"]) {
-        setDescription(in: &root, path: ["properties","events","properties","allOf","items","properties","endYyyymm"], description: endDesc)
-        setDescription(in: &root, path: ["properties","events","properties","anyOf","items","properties","endYyyymm"], description: endDesc)
-        setDescription(in: &root, path: ["properties","events","properties","exclude","items","properties","endYyyymm"], description: endDesc)
+        setDescription(in: &root, path: ["properties","events","properties","allOf","items","properties","endYYYYMM"], description: endDesc)
+        setDescription(in: &root, path: ["properties","events","properties","anyOf","items","properties","endYYYYMM"], description: endDesc)
+        setDescription(in: &root, path: ["properties","events","properties","exclude","items","properties","endYYYYMM"], description: endDesc)
     }
-
+    
     return .object(root)
 }
 

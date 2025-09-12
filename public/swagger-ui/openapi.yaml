@@ -46,14 +46,14 @@ paths:
               $ref: '#/components/schemas/QueryRequest'
             examples:
               queryExample:
-                summary: Patients with diabetes and male gender
+                summary: Patients with diabetes in 2022 and male gender
                 value:
                   attributes:
                     allOf:
                       - { attr: gender, value: Male }
                   events:
                     allOf:
-                      - { attr: conditionCode, value: E11 }
+                        - { attr: conditionCode, value: E11, startYYYYMM: 202201, endYYYYMM: 202212  }
       responses:
         '200':
           description: Query results
@@ -193,13 +193,20 @@ paths:
                     $ref: '#/components/schemas/Message'
               required: [context]
             examples:
-              askExample:
-                summary: User asks about black males with diabetes
+              attributes, conditions, and relative time range:
+                summary: User asks about black males with diabetes in the time range relative to today
                 value:
                   conversationId: "conv-123"
                   context:
                     - role: user
-                      content: "Show me black male patients with type 2 diabetes in the last 2 years"
+                      content: "Show me black male patients with type 2 diabetes in the past 2 years"
+              attributes, conditions, and time range:
+                summary: User asks about black males with diabetes in a specific time range
+                value:
+                  conversationId: "conv-456"
+                  context:
+                    - role: user
+                      content: "Show me black male patients dx with type 2 diabetes from jan 2021 to apr 2022"
       responses:
         '200':
           description: Agent response
@@ -228,7 +235,7 @@ paths:
                             - { attr: race, value: Black or African American }
                         events:
                           anyOf:
-                            - { attr: conditionCode, value: E11, start_yyyymm: 202201, end_yyyymm: 202412 }
+                            - { attr: conditionCode, value: E11, startYYYYMM: 202201, endYYYYMM: 202412 }
                       queryResults:
                         count: 3
                         patients: ["501", "502", "503"]
@@ -305,16 +312,16 @@ components:
         value:
           type: string
           description: Event code or value (supports wildcards like H91.1*).
-        start_yyyymm:
+        startYYYYMM:
           type: integer
           description: Start of the date range for Event search in yyyymm format (e.g., 202104).
-        end_yyyymm:
+        endYYYYMM:
           type: integer
           description: End of the date range for Event search in yyyymm format (e.g., 202212).
       required: [attr, value]
       dependentRequired:
-        start_yyyymm: [end_yyyymm]
-        end_yyyymm: [start_yyyymm]
+        startYYYYMM: [endYYYYMM]
+        endYYYYMM: [startYYYYMM]
 
     Message:
       type: object
