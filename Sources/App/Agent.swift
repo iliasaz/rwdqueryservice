@@ -77,7 +77,7 @@ struct Agent: @unchecked Sendable {
     /// - Parameter context: The conversation context as an array of Message objects.
     /// - Returns: An agent Message response.
     func ask(context: [AgentMessage]) async throws -> AgentMessage {
-        guard let userInput = context.last(where: { $0.role == .user })?.content else {
+        guard !context.isEmpty else {
             return AgentMessage(
                 role: .agent,
                 content: "I didn’t receive a user message to act on. Please provide your question."
@@ -90,7 +90,7 @@ struct Agent: @unchecked Sendable {
         
         do {
             let request = CreateModelResponseQuery(
-                input: .textInput(userInput),
+                input: makeModelInput(from: context),
                 model: .gpt5,
                 instructions: instructions.replacingOccurrences(of: "[ATTRIBUTE_VALUE_LIST]", with: self.attributeValueList),
                 reasoning: .init(effort: .low),
@@ -122,9 +122,7 @@ struct Agent: @unchecked Sendable {
                                 logger.error("Cannot decode UTF8 from functionCall.arguments")
                                 break
                             }
-                            logger.debug("Function call: \(String(data: argData, encoding: .utf8))")
                             let queryRequest = try JSONDecoder().decode(QueryRequest.self, from: argData)
-                            logger.debug("Processing query: \(queryRequest)")
                             let queryResults = queryEngine.queryFromPayload(queryRequest: queryRequest, countOnly: true)
                             agentResponse.proposedQuery = queryRequest
                             agentResponse.queryResults = queryResults
@@ -148,37 +146,31 @@ struct Agent: @unchecked Sendable {
                 return agentResponse
             }
             
-//            if agentResponse.proposedQuery != nil && agentResponse.queryResults != nil && (agentResponse.content ?? "").isEmpty {
-//                // Get some description fo the results
-//                let request = CreateModelResponseQuery(
-//                    input: .inputItemList(
-//                        [
-//                            .inputMessage(.init(role: .user, content: .textInput(userInput))),
-//                            .inputMessage(.init(role: .assistant, content: .textInput(agentResponse.proposedQuery.debugDescription))),
-//                            .inputMessage(.init(role: .assistant, content: .textInput(agentResponse.queryResults.debugDescription)))
-//                        ]
-//                    ),
-//                    model: .gpt4_1,
-//                    instructions: RESULT_FOLLOWUP,
-//                    reasoning: .init(effort: .none),
-//                    text: .text,
-//                )
-//                let result: ResponseObject = try await openai.responses.createResponse(query: request)
-//                for output in result.output {
-//                    switch output {
-//                        case .outputMessage(let outputMessage):
-//                            for content in outputMessage.content {
-//                                switch content {
-//                                    case .OutputTextContent(let textContent):
-//                                        agentResponse.content?.append(textContent.text)
-//                                    case .RefusalContent(let refusalContent):
-//                                        logger.info("LLM refused to reply: \(refusalContent.refusal)")
-//                                }
-//                            }
-//                        default: continue
-//                    }
-//                }
-//            }
+            if agentResponse.proposedQuery != nil && agentResponse.queryResults != nil && (agentResponse.content ?? "").isEmpty {
+                // Get concise guidance on results and next steps using the follow-up prompt
+                let request = CreateModelResponseQuery(
+                    input: makeFollowupModelInput(from: context, with: agentResponse),
+                    model: .gpt5,
+                    instructions: RESULT_FOLLOWUP,
+                    reasoning: .init(effort: .none),
+                    text: .text
+                )
+                let result: ResponseObject = try await openai.responses.createResponse(query: request)
+                for output in result.output {
+                    switch output {
+                        case .outputMessage(let outputMessage):
+                            for content in outputMessage.content {
+                                switch content {
+                                    case .OutputTextContent(let textContent):
+                                        agentResponse.content?.append(textContent.text)
+                                    case .RefusalContent(let refusalContent):
+                                        logger.info("LLM refused to reply: \(refusalContent.refusal)")
+                                }
+                            }
+                        default: continue
+                    }
+                }
+            }
             return agentResponse
         } catch {
             return Components.Schemas.Message(
@@ -252,6 +244,65 @@ struct Agent: @unchecked Sendable {
             attributes: req.attributes,
             events: normalizeEventFilters(req.events)
         )
+    }
+
+    private func makeModelInput(from context: [AgentMessage]) -> CreateModelResponseQuery.Input {
+        var items: [InputItem] = []
+        items.reserveCapacity(context.count)
+        
+        for msg in context {
+            guard let role = mapRole(msg.role) else { continue }
+            let text = renderMessageContentForLLM(msg)
+            let inputMsg = EasyInputMessage(role: role, content: .textInput(text))
+            items.append(.inputMessage(inputMsg))
+        }
+        
+        return .inputItemList(items)
+    }
+    
+    private func makeFollowupModelInput(from context: [AgentMessage], with response: AgentMessage) -> CreateModelResponseQuery.Input {
+        var items: [InputItem] = []
+        items.reserveCapacity(context.count + 1)
+        
+        // Include full prior conversation
+        for msg in context {
+            guard let role = mapRole(msg.role) else { continue }
+            let text = renderMessageContentForLLM(msg)
+            let inputMsg = EasyInputMessage(role: role, content: .textInput(text))
+            items.append(.inputMessage(inputMsg))
+        }
+        
+        // Append the assistant's structured output (proposedQuery + queryResults) we just computed
+        let appendedAssistantText = renderMessageContentForLLM(response)
+        let assistantMsg = EasyInputMessage(role: .assistant, content: .textInput(appendedAssistantText))
+        items.append(.inputMessage(assistantMsg))
+        
+        return .inputItemList(items)
+    }
+    
+    private func mapRole(_ role: AppAPI.Components.Schemas.Message.RolePayload?) -> EasyInputMessage.RolePayload? {
+        switch role {
+        case .user: return .user
+        case .agent: return .assistant
+        case .system: return .system
+        default: return nil
+        }
+    }
+    
+    private func renderMessageContentForLLM(_ msg: AgentMessage) -> String {
+        var parts: [String] = []
+        if let content = msg.content, !content.isEmpty {
+            parts.append(content)
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        if let pq = msg.proposedQuery, let data = try? encoder.encode(pq), let s = String(data: data, encoding: .utf8) {
+            parts.append("proposedQuery:\n\(s)")
+        }
+        if let qr = msg.queryResults, let data = try? encoder.encode(qr), let s = String(data: data, encoding: .utf8) {
+            parts.append("queryResults:\n\(s)")
+        }
+        return parts.joined(separator: "\n\n")
     }
     
     // MARK: - Static prompt templates
@@ -333,16 +384,15 @@ struct Agent: @unchecked Sendable {
     """
     
     private let RESULT_FOLLOWUP = """
-    You are an expert in clinical informatics expert and data analysis and reporting. You have just completed  a task of estimating a patient cohort size based on the user input.
+    You are an expert in clinical informatics expert and data analysis and reporting. You have just completed calculating a patient cohort size based on the user input.
     
     Instructions:
-    - Analyze the results. If the result count is 0, it may indicate to a problem with the formulation of the request or the query. Critically review the user input and the query formulation. Provide consise recommendation and ask the user if they would like to proceed.
-    - If the result count looks reasonable, suggest options to further refine the cohort definition but stay within the available attributes and events. Do NOT suggest other attributes or events that are not available in the dataset. Make suggestions brief.
-    -- Available Atributes: gender, race, ethnicity, yearOfBirth, state, metro, urban.
-    -- Available Events: conditionCode, medicationCode, procedureCode.
-    - Politely ask if the user would like to go on with either option or if they would like to refine the query further.
+    - Analyze the results. If the result count is 0, it may indicate a problem with the formulation of the request or the query. In this case, critically review the user input and the query formulation. Provide consise recommendation and ask the user if they would like to proceed.
+    - If the result count looks reasonable, suggest 1-2 options to further refine the cohort definition but stay within the available attributes and event types. 
+    ⚠️ Do NOT suggest other attributes or events that are not available in the dataset. 
+    ⚠️ Do NOT suggest correlated or nested criteria. Make the suggestions brief.
+    - Available Atributes: gender, race, ethnicity, state, metro, urban.
+    - Available Events: conditionCode, medicationCode, procedureCode.
+    - Politely ask if the user would like to go on with either option or if they need other help.
     """
 }
-
-
-
