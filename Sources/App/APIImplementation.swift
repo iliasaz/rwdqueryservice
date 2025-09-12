@@ -84,45 +84,19 @@ struct APIImplementation: APIProtocol {
     func searchEvents(_ input: AppAPI.Operations.SearchEvents.Input) async throws -> AppAPI.Operations.SearchEvents.Output {
         // Extract query params with defaults
         let eventType = input.query.eventType.rawValue
-        let keyword = input.query.keyword.lowercased()
         let matchMode = input.query.match?.rawValue ?? "prefix"
         let limit = max(1, min(input.query.limit ?? 20, 100))
         let offset = max(0, input.query.offset ?? 0)
-        
-        guard !keyword.isEmpty else {
-            let response = AppAPI.Operations.SearchEvents.Output.Ok.Body.JsonPayload(values: [], total: 0)
-            return .ok(.init(body: .json(response)))
-        }
-        
-        // Lookup attribute ID for the selected event type and its values
-        guard let attrId = queryEngine.dict.attrToID[eventType],
-              let vmap = queryEngine.dict.valueToID[attrId] else {
-            let response = AppAPI.Operations.SearchEvents.Output.Ok.Body.JsonPayload(values: [], total: 0)
-            return .ok(.init(body: .json(response)))
-        }
-        
-        // Filter values case-insensitively
-        let allValues = Array(vmap.keys)
-        let prefixMatches = allValues.filter { $0.lowercased().hasPrefix(keyword) }.sorted()
-        
-        let matches: [String]
-        if matchMode == "contains" {
-            let substrMatches = allValues.filter { val in
-                let lower = val.lowercased()
-                return lower.contains(keyword) && !lower.hasPrefix(keyword)
-            }.sorted()
-            matches = prefixMatches + substrMatches
-        } else {
-            matches = prefixMatches
-        }
-        
-        // Paging
-        let total = matches.count
-        let start = min(offset, total)
-        let end = min(start + limit, total)
-        let page = Array(matches[start..<end])
-        
-        let response = AppAPI.Operations.SearchEvents.Output.Ok.Body.JsonPayload(values: page, total: total)
+        let keyword = input.query.keyword
+
+        let (values, total) = queryEngine.searchEventValues(
+            eventType: eventType,
+            keyword: keyword,
+            matchMode: matchMode,
+            limit: limit,
+            offset: offset
+        )
+        let response = AppAPI.Operations.SearchEvents.Output.Ok.Body.JsonPayload(values: values, total: total)
         return .ok(.init(body: .json(response)))
     }
     
