@@ -80,6 +80,11 @@ struct APIImplementation: APIProtocol {
         return .ok(.init(body: .json(responseBody)))
     }
     
+    /// /health
+    func getHealth(_ input: AppAPI.Operations.GetHealth.Input) async throws -> AppAPI.Operations.GetHealth.Output {
+        return .ok(.init(body: .plainText("ok")))
+    }
+
     /// /events/search
     func searchEvents(_ input: AppAPI.Operations.SearchEvents.Input) async throws -> AppAPI.Operations.SearchEvents.Output {
         // Extract query params with defaults
@@ -99,9 +104,5 @@ struct APIImplementation: APIProtocol {
         let response = AppAPI.Operations.SearchEvents.Output.Ok.Body.JsonPayload(values: values, total: total)
         return .ok(.init(body: .json(response)))
     }
-    
-    /// /health
-    func getHealth(_ input: AppAPI.Operations.GetHealth.Input) async throws -> AppAPI.Operations.GetHealth.Output {
-        return .ok(.init(body: .plainText("ok")))
-    }
+
 }
