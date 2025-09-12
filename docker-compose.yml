@@ -23,7 +23,7 @@
 x-shared_environment: &shared_environment
   LOG_LEVEL: ${LOG_LEVEL:-debug}
   INDEX_FILE_PATH: /app/data/prqt.rwdx
-
+  OPENAI_API_KEY: "put your key here"
 services:
   app:
     image: rwdqueryservice:latest
