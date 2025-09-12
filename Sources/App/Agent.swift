@@ -47,6 +47,9 @@ struct Agent: @unchecked Sendable {
         
         queryRequestSchema =  try! derivedQueryRequestSchema()
         queryTool = FunctionTool(name: "QueryPatients", parameters: queryRequestSchema, strict: false)
+        
+        let derivedSchemaStr = (try? derivedQueryRequestSchemaJSONString(prettyPrinted: true)) ?? ""
+        logger.debug("derivedSchema:\n\(derivedSchemaStr)\n\n")
     }
     
     private let queryRequestSchema: JSONSchema
@@ -81,21 +84,18 @@ struct Agent: @unchecked Sendable {
             )
         }
         
-        var messageHistory = context
-        
         let instructions = [
             SYSTEM_PROMPT,
-//            PLANNER_PROMPT
         ].joined(separator: "\n\n")
         
         do {
             let request = CreateModelResponseQuery(
                 input: .textInput(userInput),
-                model: .gpt4_o_mini,
+                model: .gpt5,
                 instructions: instructions.replacingOccurrences(of: "[ATTRIBUTE_VALUE_LIST]", with: self.attributeValueList),
-                reasoning: .init(effort: .none),
+                reasoning: .init(effort: .low),
                 text: .text,
-                toolChoice: .ToolChoiceFunction(.init(_type: .function, name: "QueryPatients")),
+                toolChoice: .ToolChoiceOptions(.auto),
                 tools: [.functionTool(.init(name: "QueryPatients", parameters: queryRequestSchema, strict: true))]
             )
             
@@ -122,6 +122,7 @@ struct Agent: @unchecked Sendable {
                                 logger.error("Cannot decode UTF8 from functionCall.arguments")
                                 break
                             }
+                            logger.debug("Function call: \(String(data: argData, encoding: .utf8))")
                             let queryRequest = try JSONDecoder().decode(QueryRequest.self, from: argData)
                             logger.debug("Processing query: \(queryRequest)")
                             let queryResults = queryEngine.queryFromPayload(queryRequest: queryRequest, countOnly: true)
@@ -147,37 +148,37 @@ struct Agent: @unchecked Sendable {
                 return agentResponse
             }
             
-            if agentResponse.proposedQuery != nil && agentResponse.queryResults != nil && (agentResponse.content ?? "").isEmpty {
-                // Get some description fo the results
-                let request = CreateModelResponseQuery(
-                    input: .inputItemList(
-                        [
-                            .inputMessage(.init(role: .user, content: .textInput(userInput))),
-                            .inputMessage(.init(role: .assistant, content: .textInput(agentResponse.proposedQuery.debugDescription))),
-                            .inputMessage(.init(role: .assistant, content: .textInput(agentResponse.queryResults.debugDescription)))
-                        ]
-                    ),
-                    model: .gpt5,
-                    instructions: RESULT_FOLLOWUP,
-                    reasoning: .init(effort: .none),
-                    text: .text,
-                )
-                let result: ResponseObject = try await openai.responses.createResponse(query: request)
-                for output in result.output {
-                    switch output {
-                        case .outputMessage(let outputMessage):
-                            for content in outputMessage.content {
-                                switch content {
-                                    case .OutputTextContent(let textContent):
-                                        agentResponse.content?.append(textContent.text)
-                                    case .RefusalContent(let refusalContent):
-                                        logger.info("LLM refused to reply: \(refusalContent.refusal)")
-                                }
-                            }
-                        default: continue
-                    }
-                }
-            }
+//            if agentResponse.proposedQuery != nil && agentResponse.queryResults != nil && (agentResponse.content ?? "").isEmpty {
+//                // Get some description fo the results
+//                let request = CreateModelResponseQuery(
+//                    input: .inputItemList(
+//                        [
+//                            .inputMessage(.init(role: .user, content: .textInput(userInput))),
+//                            .inputMessage(.init(role: .assistant, content: .textInput(agentResponse.proposedQuery.debugDescription))),
+//                            .inputMessage(.init(role: .assistant, content: .textInput(agentResponse.queryResults.debugDescription)))
+//                        ]
+//                    ),
+//                    model: .gpt4_1,
+//                    instructions: RESULT_FOLLOWUP,
+//                    reasoning: .init(effort: .none),
+//                    text: .text,
+//                )
+//                let result: ResponseObject = try await openai.responses.createResponse(query: request)
+//                for output in result.output {
+//                    switch output {
+//                        case .outputMessage(let outputMessage):
+//                            for content in outputMessage.content {
+//                                switch content {
+//                                    case .OutputTextContent(let textContent):
+//                                        agentResponse.content?.append(textContent.text)
+//                                    case .RefusalContent(let refusalContent):
+//                                        logger.info("LLM refused to reply: \(refusalContent.refusal)")
+//                                }
+//                            }
+//                        default: continue
+//                    }
+//                }
+//            }
             return agentResponse
         } catch {
             return Components.Schemas.Message(
@@ -232,11 +233,11 @@ struct Agent: @unchecked Sendable {
             func norm(_ list: [AppAPI.Components.Schemas.EventFilter]?) -> [AppAPI.Components.Schemas.EventFilter]? {
                 guard let list else { return nil }
                 return list.map { ef in
-                    Components.Schemas.EventFilter(
+                    AppAPI.Components.Schemas.EventFilter(
                         attr: ef.attr,
                         value: normalizeCode(ef.value),
-                        startYyyymm: ef.startYyyymm,
-                        endYyyymm: ef.endYyyymm
+                        startYYYYMM: ef.startYYYYMM,
+                        endYYYYMM: ef.endYYYYMM
                     )
                 }
             }
@@ -260,42 +261,75 @@ struct Agent: @unchecked Sendable {
     /// limiting eagerness, and clear stop conditions).
     
     private let SYSTEM_PROMPT = """
-    You are an expert in clinical informatics expert and data analysis and reporting. Your job is extract the important conditions from the user input, arrange them logically in inclusion and exclusion conditions, and put them in a **structured** form honored by QueryPatients tool. These conditions may include the following:
+    You are an expert in clinical informatics, data analysis and reporting. Your job is help a user to translate their search request into a **structured** set of inclusion/exclusion conditions. If the user asks about anything else, politely and briefly respond that you don't have expertise in other fields and do not call any tools. 
+    If the user question is indeed about patient query or cohort building, analyze the request with the objective of forming a well structured query and call QueryPatients tool for executing the query. The criteria may include the following elements:
     
-      - Attributes (do not have time component): gender, race, ethnicity, yearOfBirth, state, metro, urban
-        Here is a list of allowed attribute values:
-    
+      - Patient demographics attributes such as gender, race, ethnicity, yearOfBirth, state, metro, urban. The user doesn't necessarily know the exact values for these attributes, and you need to map the user request to the allowed values of the attributes. For example, "show me whilte women in rural areas of Arizona and California" should translate to the following structure:
+    ```json
+    "attributes": {
+        "allOf": [
+          {
+            "attr": "gender",
+            "value": "Female"
+          },
+          {
+            "attr": "race",
+            "value": "White"
+          },
+          {
+            "attr": "urban",
+            "value": "rural"
+          }
+        ],
+        "anyOf": [
+          {
+            "attr": "state",
+            "value": "AZ"
+          },
+          {
+            "attr": "state",
+            "value": "CA"
+          }
+      }
+    ```
+    Remember to use `anyOf` for lists and OR operations. Here is a list of allowed attribute values. 
     [ATTRIBUTE_VALUE_LIST]
+    Attribute `state` has abbreviated US states, eg. AZ, CA, TX, and etc. 
+    Attribute yearOfBirth just a 4-digit year of birht, eg. 1948, 2005, and etc.
     
-      - Events: conditionCode, medicationCode, procedureCode. The event conditions can include a date range expressed as YYYYMM (year and month) start and end. For example, if the user input refers to H91 diagnosis from December 2019 to May 2023, you should put startYyyymm = 201912 and endYyyymm = 202305. ALWAYS include the date range if the user referred to it.
+      - Patient Events such as diagnoses, procedures, medications. Events are codifed with one or more common ontologies like ICD10, Multum, CPT. Pass the event code type in the `attr` property. Allowed values for 'attr' property in `events` object are: conditionCode, medicationCode, procedureCode. The user input may have a mixture of codified values like ICD10 codes for diagnosis (eg. E11.*), Multum codes for drugs as well as spelled out or abbreviated medical terms. You must substitute the terms with the corresponding codes based on your best judgment. Use the wildcard '*' symbol at the end of the code whenever applicable.
+        
+    The events may also include a date range expressed as startYYYYMM and endYYYYMM values in YYYYMM (year and month) format. For example, a user ias asking about patients diagnosed with asthma in the past 2 years.
     
-    The user input may have a mixture of codified values like ICD10 codes for diagnosis (eg. E11.*), Multum codes for drugs as well as spelled out or abbreviated medical terms. You must substitute the terms with the corresponding codes based on your best judgment. You may use wildcard '*' sign at the end of the code when there is no exact match. When a date range is provided for event conditions (eg., pateint diagnosed with apnea in 2022), make sure to convert the range to the YYYYMM format and use **anyOf** predicate along with startYyyymm and endYyyymm properties.
+    User: "Patients diagnosed with asthma in the past 2 years"
+    Today = 2025-09-11
+    "events": {
+    "allOf": [
+    {
+      "attr": "conditionCode",
+      "value": "J45.*",
+      "startYYYYMM": 202309,
+      "endYYYYMM": 202509
+    }
+    ]
+    }
+        
+    If the user mentions ANY temporal reference (absolute dates like “from 2019 to 2023” OR relative periods like “last 2 years”), you MUST output BOTH `startYYYYMM` and `endYYYYMM`. 
+    - Convert relative time to absolute year-month using TODAY = 2025-09-11. 
+    - Use YYYYMM format, always 6 digits, with zero padding.
+    - If you cannot determine a period, return null explicitly for both.
     
-    Objectives
-    - If the user intent is to query data, compose a valid QueryRequest (JSON) for the QueryPatients tool according to the tool schema.
-    - Replace any 'x' or 'X' in codes with '*'. Support wildcards such as 'E11.*'.
-    - If codes are not given, infer common medical codes (e.g., "type 2 diabetes" → E11.*).
-    - Recognize user-provided date range and pass it as startYyyymm and endYyyymm in YYYYMM format.
-    - Use allOf/anyOf/exclude correctly. If a date range or a wildcard code is provided, ALWAYS apply 'anyOf' predicate.
-    - If necessary information is missing or unsupported attributes are requested, ask a **brief** clarification and/or suggest supported options.
+    Instructions
+    Step 1: Understand the user question. Verify that the user is asking a question about patient population. If the user asks for something else, politely and briefly respond that you don't have expertise in other fields. 
+    Step 2: Decide whether you have enough information to call QueryPatients tool now. If not, ask for at most 2 clarifications (brief) and propose defaults where reasonable.
+    Step 3: Extract demographics attributes.
+    Step 4: Extract events and map medical terms to codes. Infer common codes when user provides medical terms. Use wildcards if necessary. Eg., "type 2 diabetes" → E11.*. Normalize code wildcard symbol (x/X → *).
+    Step 3: Extract temporal constraints. If any, normalize into {startYYYYMM, endYYYYMM}. Convert relative time to absolute year-month using TODAY = 2025-09-11.
+    Step 5: Compose conditions into allOf/anyOf/exclude blocks properly. Always translate IN lists to `anyOf` condition block.
+    Step 4: Compose QueryPatients JSON with attributes + events.
     
-    Autonomy & Stop Conditions
-    - Bias toward the accurate representation of the user input in the query conditions. Make sure to capture ALL relevant information.
-    - Stop after the query is executed and results are summarized with 1–2 suggested refinements.
-    - Keep the final user-facing message brief and clear.
-    """
-    
-    /// “Planner” prompt for a single turn. The model should return a **minimal plan** and either
-    /// a proposed QueryRequest or a clarification.
-    private let PLANNER_PROMPT = """
-    Task: Given the user message and prior context, decide if you can run a query now.
-    If yes: produce a full plan and a complete QueryRequest (attributes/events), then run the query.
-    If no: ask for at most 2 clarifications (brief), and propose defaults where reasonable.
-    - Normalize codes (x/X → *).
-    - Infer common codes when users provide medical terms. Use wildcards if necessary.
-    - Extract date range in YYYYMM format if the user request refers to a date range. If the user refers to the current date, use it as the basis for the date range calculation. For example, if the user asks for events in the past year, use the current date minus one year. NEVER ignore the user specified date range.
-    - Use allOf/anyOf and exclude properly.
-    Output: a short plan; then either (A) a QueryRequest or (B) clarifications to ask.
+    Always bias toward the accurate representation of the user request. Make sure to capture ALL relevant information accurately.
+    ⚠️ If you omit startYYYYMM or endYYYYMM when a period is present, your output will be rejected. Always resolve relative time into YYYYMM based on TODAY = 2025-09-11.
     """
     
     private let RESULT_FOLLOWUP = """
@@ -308,7 +342,6 @@ struct Agent: @unchecked Sendable {
     -- Available Events: conditionCode, medicationCode, procedureCode.
     - Politely ask if the user would like to go on with either option or if they would like to refine the query further.
     """
-
 }
 
 

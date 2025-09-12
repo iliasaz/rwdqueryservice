@@ -88,7 +88,7 @@ class QueryEngine: @unchecked Sendable {
             // Determine code expansion
             if filter.value.contains("*") {
                 let expandedVals = dict.makeAttrVals(attr: attrKey, pattern: filter.value) // returns [AttrVal]
-                if let start = filter.startYyyymm, let end = filter.endYyyymm {
+                if let start = filter.startYYYYMM, let end = filter.endYYYYMM {
                     // OR all months across all expanded codes (as years terms)
                     let months = expandMonthRange(from: start, to: end)
                     for av in expandedVals {
@@ -101,7 +101,7 @@ class QueryEngine: @unchecked Sendable {
             } else {
                 // Exact code
                 if let valId = dict.valueToID[attrId]?[filter.value] {
-                    if let start = filter.startYyyymm, let end = filter.endYyyymm {
+                    if let start = filter.startYYYYMM, let end = filter.endYYYYMM {
                         let months = expandMonthRange(from: start, to: end)
                         group.years.append(contentsOf: makeAttrValYears(attrId: attrId, val: valId, months: months))
                     } else {
