@@ -1,1 +1,534 @@
-../../public/swagger-ui/openapi.yaml
+openapi: '3.1.0'
+info:
+  title: RWD Query Service
+  version: 1.0.0
+servers:
+  - url: /
+    description: RWD Query Service
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns `ok` if the service is alive.
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                okExample:
+                  value: "ok"
+
+  /query:
+    post:
+      summary: Query patients by attributes and events
+      description: >
+        Execute a structured query against the patient index using attribute filters
+        and event filters. Supports `allOf`, `anyOf`, and `exclude` semantics for
+        both timeless attributes and time-bounded events.
+      operationId: queryPatients
+      parameters:
+        - in: query
+          name: countOnly
+          schema:
+            type: boolean
+            default: true
+          description: >
+            If true, only return the count of matching patients. This is the default.
+        # ADD: profile flag
+        - in: query
+          name: profile
+          schema:
+            type: boolean
+            default: false
+          description: >
+            If true, compute and return cohortProfile (group-by counts for demographics and included event codes).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+            examples:
+              queryExample:
+                summary: Patients with diabetes in 2022 and male gender
+                value:
+                  attributes:
+                    allOf:
+                      - { attr: gender, value: Male }
+                  events:
+                    allOf:
+                        - { attr: conditionCode, value: E11, startYYYYMM: 202201, endYYYYMM: 202212  }
+      responses:
+        '200':
+          description: Query results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResults'
+              examples:
+                queryResultsExample:
+                  summary: 3 matching patients
+                  value:
+                    count: 3
+                    patients: ["1001", "1002", "1003"]
+        '400':
+          description: Malformed query payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                badQuery:
+                  value:
+                    code: "InvalidRequest"
+                    message: "Missing required field 'attributes' or 'events'"
+
+  /attributes:
+    get:
+      summary: List available patient attributes
+      description: Returns the list of supported timeless patient attributes.
+      operationId: listAttributes
+      responses:
+        '200':
+          description: List of supported attributes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  enum: [gender, race, ethnicity, yearOfBirth, state, metro, urban]
+              examples:
+                attributesExample:
+                  value: ["gender", "race", "ethnicity", "yearOfBirth"]
+  /eventTypes:
+    get:
+      summary: List available patient event types
+      description: Returns the list of supported event types that can be queried.
+      operationId: listEventTypes
+      responses:
+        '200':
+          description: List of supported event types
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  enum: [conditionCode, medicationCode, procedureCode]
+              examples:
+                eventTypesExample:
+                  value: ["conditionCode", "medicationCode", "procedureCode"]
+  /values/{attr}:
+    get:
+      summary: List available values for a given attribute
+      description: Returns all possible values for the specified attribute.
+      operationId: listAttributeValues
+      parameters:
+        - in: path
+          name: attr
+          required: true
+          schema:
+            type: string
+            enum: [gender, race, ethnicity, yearOfBirth, state, metro, urban]
+          description: Attribute name
+          examples:
+            attrExample:
+              value: gender
+      responses:
+        '200':
+          description: List of available values for the specified attribute
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              examples:
+                valuesExample:
+                  summary: Gender values
+                  value: ["male", "female"]
+        '404':
+          description: Attribute not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                attrNotFound:
+                  value:
+                    code: "NotFound"
+                    message: "Attribute 'foo' is not a supported attribute"
+        '422':
+          description: Query result set too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                tooManyResults:
+                  value:
+                    code: "TooManyResults"
+                    message: "Query matched more than 1,000,000 patients. Please refine your filters."
+  /ask:
+    post:
+      summary: Conversational patient query
+      description: >
+        Accepts free-form natural language questions (e.g., *"show me patients with diagnosis X over the past 2 years who also took drug Y"*) 
+        and routes them to an LLM-based agent.  
+        The agent interprets the request, may ask clarifying questions, and can execute structured queries internally.  
+        Multi-turn interactions are supported by passing the conversation context, where the last `user` message is treated as the new input.
+      operationId: ask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                conversationId:
+                  type: string
+                  description: Identifier for a conversation thread (allows context to persist across multiple calls).
+                context:
+                  type: array
+                  description: >
+                    Prior conversation messages. The last `user` message in this array
+                    is treated as the new input. Earlier messages provide context.
+                  items:
+                    $ref: '#/components/schemas/Message'
+              required: [context]
+            examples:
+              attributes, conditions, and relative time range:
+                summary: User asks about black males with diabetes in the time range relative to today
+                value:
+                  conversationId: "conv-123"
+                  context:
+                    - role: user
+                      content: "Show me black male patients with type 2 diabetes in the past 2 years"
+              attributes, conditions, and time range:
+                summary: User asks about black males with diabetes in a specific time range
+                value:
+                  conversationId: "conv-456"
+                  context:
+                    - role: user
+                      content: "Show me black male patients dx with type 2 diabetes from jan 2021 to apr 2022"
+              askMultiTurnExample:
+                summary: Multi-turn refinement
+                value:
+                  conversationId: "conv-456"
+                  context:
+                    - role: user
+                      content: "Show me male patients with hypertension from 2020 to 2022"
+                    - role: agent
+                      content: |
+                        Result: 1 male patient with a hypertension diagnosis (I10) between 2020-01 and 2022-12.
+
+                        Would you like to refine?
+                        - Option A: Broaden conditionCode to include I10–I15 to capture all hypertension-related diagnoses during 2020–2022.
+                        - Option B: Add an attribute filter such as state, metro/urban, race/ethnicity, or a yearOfBirth range to focus the cohort.
+
+                        Shall I proceed with either option, or do you need something else?
+                      proposedQuery:
+                        attributes:
+                          allOf:
+                            - { attr: gender, value: Male }
+                        events:
+                          allOf:
+                            - { attr: conditionCode, value: I10.*, startYYYYMM: 202001, endYYYYMM: 202212 }
+                      queryResults:
+                        count: 1
+                    - role: user
+                      content: "expand the search to include I11.*, I15.*"
+      responses:
+        '200':
+          description: Agent response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conversationId:
+                    type: string
+                    description: The conversation thread identifier.
+                  message:
+                    $ref: '#/components/schemas/Message'
+              examples:
+                askResponseExample:
+                  summary: Agent clarifies and executes query
+                  value:
+                    conversationId: "conv-123"
+                    message:
+                      role: agent
+                      content: "Here are black male patients with type 2 diabetes (E11) between 2022 and 2024"
+                      proposedQuery:
+                        attributes:
+                          allOf:
+                            - { attr: gender, value: Male }
+                            - { attr: race, value: Black or African American }
+                        events:
+                          anyOf:
+                            - { attr: conditionCode, value: E11, startYYYYMM: 202201, endYYYYMM: 202412 }
+                      queryResults:
+                        count: 3
+                        patients: ["501", "502", "503"]
+        '400':
+          description: Malformed query payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                badQuery:
+                  value:
+                    code: "InvalidRequest"
+                    message: "Missing required field 'attributes' or 'events'"
+
+  /events/search:
+    get:
+      summary: Search event codes
+      description: >
+        Search event code values (conditionCode, medicationCode, or procedureCode) for type-ahead suggestions.
+      operationId: searchEvents
+      parameters:
+        - in: query
+          name: eventType
+          required: true
+          schema:
+            type: string
+            enum: [conditionCode, medicationCode, procedureCode]
+          description: Event type to search values for.
+          example: conditionCode
+        - in: query
+          name: keyword
+          required: true
+          schema:
+            type: string
+            minLength: 1
+          description: Case-insensitive search keyword.
+          example: E11
+        - in: query
+          name: match
+          schema:
+            type: string
+            enum: [prefix, contains]
+            default: prefix
+          description: >
+            Match mode. 'prefix' matches values that start with keyword. 'contains'
+            returns prefix matches first then substring matches.
+          example: contains
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Maximum number of results to return.
+          example: 10
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of results to skip (for paging).
+          example: 0
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  values:
+                    type: array
+                    items:
+                      type: string
+                  total:
+                    type: integer
+                required: [values, total]
+              examples:
+                example:
+                  value:
+                    values: ["E11", "E110"]
+                    total: 1234
+components:
+  schemas:
+    AttributeFilters:
+      type: object
+      description: Timeless patient attribute filters.
+      properties:
+        allOf:
+          type: array
+          description: Patients must have all of these attributes.
+          items: { $ref: '#/components/schemas/AttrVal' }
+        anyOf:
+          type: array
+          description: Patients must have at least one of these attributes.
+          items: { $ref: '#/components/schemas/AttrVal' }
+        exclude:
+          type: array
+          description: Patients must not have any of these attributes.
+          items: { $ref: '#/components/schemas/AttrVal' }
+
+    EventFilters:
+      type: object
+      description: Event filters with optional time windows.
+      properties:
+        allOf:
+          type: array
+          description: Patients must have all of these events.
+          items: { $ref: '#/components/schemas/EventFilter' }
+        anyOf:
+          type: array
+          description: Patients must have at least one of these events.
+          items: { $ref: '#/components/schemas/EventFilter' }
+        exclude:
+          type: array
+          description: Patients must not have any of these events.
+          items: { $ref: '#/components/schemas/EventFilter' }
+
+    AttrVal:
+      type: object
+      description: Attribute filter specifying an attribute-value pair.
+      properties:
+        attr:
+          type: string
+          description: Attribute name.
+          enum: [gender, race, ethnicity, yearOfBirth, state, metro, urban]
+        value:
+          type: string
+          description: Attribute value.
+      required: [attr, value]
+
+    EventFilter:
+      type: object
+      description: >
+        Event filter specifying an event type, value, and optional time window. For example, attr: {type: conditionCode, value: E11.*, startYyyymm: 202104, endYyyymm: 202212}
+      properties:
+        attr:
+          type: string
+          description: Event type.
+          enum: [conditionCode, medicationCode, procedureCode]
+        value:
+          type: string
+          description: Event code or value (supports wildcards like H91.1*).
+        startYYYYMM:
+          type: integer
+          description: Start of the date range for Event search in yyyymm format (e.g., 202104).
+        endYYYYMM:
+          type: integer
+          description: End of the date range for Event search in yyyymm format (e.g., 202212).
+      required: [attr, value]
+      dependentRequired:
+        startYYYYMM: [endYYYYMM]
+        endYYYYMM: [startYYYYMM]
+
+    Message:
+      type: object
+      description: A conversational message within a session.
+      properties:
+        role:
+          type: string
+          description: Role of the message sender.
+          enum: [user, agent, system]
+        content:
+          type: string
+          description: Natural language text of the message.
+        proposedQuery:
+          $ref: '#/components/schemas/QueryRequest'
+          description: Structured query proposed by the agent.
+        queryResults:
+          $ref: '#/components/schemas/QueryResults'
+          description: Results if the query was executed.
+
+    QueryRequest:
+      type: object
+      description: Structured query specifying attribute and event filters.
+      properties:
+        attributes:
+          $ref: '#/components/schemas/AttributeFilters'
+        events:
+          $ref: '#/components/schemas/EventFilters'
+
+    QueryResults:
+      type: object
+      description: Results returned from executing a query.
+      properties:
+        count:
+          type: integer
+          description: Number of matching patients.
+        patients:
+          type: array
+          description: List of matching patient IDs (omitted if countOnly=true).
+          items:
+            type: string
+        # ADD: optional cohortProfile
+        cohortProfile:
+          $ref: '#/components/schemas/CohortProfile'
+
+    # ADD: Cohort profiling schemas
+    CohortProfile:
+      type: object
+      description: Group-by counts for demographics attributes and included event codes within the cohort.
+      properties:
+        attributes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttributeGroup'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventGroup'
+
+    AttributeGroup:
+      type: object
+      description: Group-by counts for a single attribute.
+      properties:
+        attribute:
+          type: string
+          description: Attribute name (e.g., gender, race).
+        values:
+          type: array
+          items:
+            $ref: '#/components/schemas/KeyCount'
+
+    EventGroup:
+      type: object
+      description: Group-by counts for a single event type (conditionCode, medicationCode, procedureCode).
+      properties:
+        eventType:
+          type: string
+        codes:
+          type: array
+          items:
+            $ref: '#/components/schemas/KeyCount'
+
+    KeyCount:
+      type: object
+      description: A key and its count within the cohort.
+      properties:
+        key:
+          type: string
+        count:
+          type: integer
+
+    ErrorResponse:
+      type: object
+      description: Standard error response object
+      properties:
+        code:
+          type: string
+          description: Short machine-readable error code (e.g., "InvalidRequest", "NotFound", "TooManyResults").
+        message:
+          type: string
+          description: Human-readable error message.
+        details:
+          type: object
+          description: Optional additional details about the error.
+      required: [code, message]

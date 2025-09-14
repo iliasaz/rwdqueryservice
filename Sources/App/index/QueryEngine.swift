@@ -17,9 +17,7 @@ class QueryEngine: @unchecked Sendable {
     
     private(set) var patientCount = 0
     private(set) var factCount = 0
-    
-    //    var attrValueStats = [Attribute: [String: Int]]() // atttribute -> value -> count
-    
+
     init(logger: Logger = Logger(label: "queryengine")) {
         self.logger = logger
     }
@@ -167,7 +165,7 @@ class QueryEngine: @unchecked Sendable {
         }
     }
     
-    func queryFromPayload(queryRequest: Components.Schemas.QueryRequest, countOnly: Bool) -> Components.Schemas.QueryResults {
+    func queryFromPayload(queryRequest: Components.Schemas.QueryRequest, countOnly: Bool, profile: Bool = false) -> Components.Schemas.QueryResults {
         // Attributes → timeless
         let attrAllOf = convertAttrFilters(queryRequest.attributes?.allOf ?? [])
         let attrAnyOf = convertAttrFilters(queryRequest.attributes?.anyOf ?? [])
@@ -188,13 +186,13 @@ class QueryEngine: @unchecked Sendable {
                 if let s = index.postingsValue[v], !s.isEmpty {
                     andPostings.append(Posting(array: s.toArray()))
                 } else {
-                    return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [])
+                    return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [], cohortProfile: nil)
                 }
             }
             if let andPosting = intersectPostings(andPostings) {
                 acc = (acc == nil) ? andPosting : acc!.intersect(andPosting)
                 if acc!.isEmpty {
-                    return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [])
+                    return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [], cohortProfile: nil)
                 }
             }
         }
@@ -206,13 +204,13 @@ class QueryEngine: @unchecked Sendable {
                 if let pg = postingFor(group: g) {
                     groupPostings.append(pg)
                 } else {
-                    return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [])
+                    return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [], cohortProfile: nil)
                 }
             }
             if let allEventPosting = intersectPostings(groupPostings) {
                 acc = (acc == nil) ? allEventPosting : acc!.intersect(allEventPosting)
                 if acc!.isEmpty {
-                    return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [])
+                    return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [], cohortProfile: nil)
                 }
             }
         }
@@ -220,7 +218,7 @@ class QueryEngine: @unchecked Sendable {
         if let anyAttrPosting = postingFor(values: attrAnyOf) {
             acc = (acc == nil) ? anyAttrPosting : acc!.intersect(anyAttrPosting)
             if acc!.isEmpty {
-                return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [])
+                return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [], cohortProfile: nil)
             }
         }
         
@@ -234,7 +232,7 @@ class QueryEngine: @unchecked Sendable {
             if let anyEventPosting = unionPostings(groupPostings) {
                 acc = (acc == nil) ? anyEventPosting : acc!.intersect(anyEventPosting)
                 if acc!.isEmpty {
-                    return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [])
+                    return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [], cohortProfile: nil)
                 }
             }
         }
@@ -260,19 +258,27 @@ class QueryEngine: @unchecked Sendable {
         if let neg, let acc0 = acc {
             acc = acc0.subtract(neg)
             if acc!.isEmpty {
-                return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [])
+                return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [], cohortProfile: nil)
             }
         }
         
         // If no positive criteria produced an accumulator, return empty set
-        guard let final = acc else {
-            return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [])
+        guard let cohort = acc else {
+            return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [], cohortProfile: nil)
         }
-        
-        let ids = final.toArray()
+
+        // Optional profiling
+        var apiProfile: Components.Schemas.CohortProfile? = nil
+        if profile {
+            let includedEvents = extractIncludedEventValues(from: eventAllOfGroups, and: eventAnyOfGroups)
+            let internalProfile = buildCohortProfile(cohort: cohort, includedEvents: includedEvents)
+            apiProfile = makeAPICohortProfile(internalProfile)
+        }
+
+        let ids = cohort.toArray()
         let count = ids.count
         let patients = countOnly ? nil : ids.map { dict.personIndexToGuid[Int($0)] }
-        return Components.Schemas.QueryResults(count: count, patients: patients)
+        return Components.Schemas.QueryResults(count: count, patients: patients, cohortProfile: apiProfile)
     }
 
     // Search event code values for type-ahead suggestions
@@ -310,6 +316,127 @@ class QueryEngine: @unchecked Sendable {
         let end = min(start + safeLimit, total)
         let page = (start < end) ? Array(matches[start..<end]) : []
         return (page, total)
+    }
+
+    struct CohortProfile {
+        struct KeyCount {
+            let key: String
+            let count: Int
+        }
+        struct AttributeGroup {
+            let attribute: String
+            var values: [KeyCount]
+        }
+        struct EventGroup {
+            let eventType: String
+            var codes: [KeyCount]
+        }
+        var attributes: [AttributeGroup]
+        var events: [EventGroup]
+    }
+
+    private func attrName(forAttrID id: Int) -> String? {
+        for (name, aid) in dict.attrToID where aid == id { return name }
+        return nil
+    }
+
+    private func valueName(forAttrID id: Int, valueID: Int) -> String? {
+        guard let vmap = dict.valueToID[id] else { return nil }
+        for (vname, vid) in vmap where vid == valueID { return vname }
+        return nil
+    }
+
+    private func extractIncludedEventValues(from groups1: [EventFilterGroup], and groups2: [EventFilterGroup]) -> [AttrVal] {
+        var set = Set<AttrVal>()
+        for g in groups1 {
+            for av in g.values { set.insert(av) }
+            for y in g.years { set.insert(AttrVal(attr: y.attr, val: y.val)) }
+        }
+        for g in groups2 {
+            for av in g.values { set.insert(av) }
+            for y in g.years { set.insert(AttrVal(attr: y.attr, val: y.val)) }
+        }
+        return Array(set)
+    }
+
+    // Profiles a cohort by calculating group-by counts by attributes and events
+    // The key idea is to get a posting (bitmap) for a given attribute or event and intersect it with the cohort posting.
+    // This gives us the posting of patients who have the given attribute or event.
+    // Since the intersect operation is done at the bitwise level, it is very efficient.
+    func buildCohortProfile(cohort: Posting, includedEvents: [AttrVal]) -> CohortProfile {
+        // Demographics from API enum, not hardcoded
+        let demographicAttrs = Components.Schemas.AttrVal.AttrPayload.allCases.map { $0.rawValue }
+
+        // Attribute groups
+        var attributeGroups: [CohortProfile.AttributeGroup] = []
+        attributeGroups.reserveCapacity(demographicAttrs.count)
+
+        for attrName in demographicAttrs {
+            guard let aid = dict.attrToID[attrName],
+                  let vmap = dict.valueToID[aid] else { continue }
+
+            var counts: [CohortProfile.KeyCount] = []
+            counts.reserveCapacity(vmap.count)
+
+            for (valueStr, vid) in vmap {
+                let av = AttrVal(attr: aid, val: vid)
+                // get posting for this attribute value and intersect with cohort posting to get the count of a given attrubute in the cohort
+                if let p = index.postingsValue[av], !p.isEmpty {
+                    let c = cohort.intersect(p).count
+                    if c > 0 {
+                        counts.append(.init(key: valueStr, count: c))
+                    }
+                }
+            }
+
+            if !counts.isEmpty {
+                counts.sort { $0.count > $1.count }
+                attributeGroups.append(.init(attribute: attrName, values: counts))
+            }
+        }
+
+        // Event groups: only codes included in the query (drop years)
+        var eventGroups: [String: [CohortProfile.KeyCount]] = [:]
+        let uniqueEvents = Array(Set(includedEvents))
+
+        for av in uniqueEvents {
+            // get posting for a given event and intersect with cohort posting to get the count of the given event in the cohort
+            guard let p = index.postingsValue[av], !p.isEmpty else { continue }
+            let count = cohort.intersect(p).count
+            if count == 0 { continue }
+
+            let eventType = attrName(forAttrID: av.attr) ?? "\(av.attr)"
+            let code = valueName(forAttrID: av.attr, valueID: av.val) ?? "\(av.val)"
+            eventGroups[eventType, default: []].append(.init(key: code, count: count))
+        }
+
+        var eventGroupArray: [CohortProfile.EventGroup] = []
+        eventGroupArray.reserveCapacity(eventGroups.count)
+        for (etype, codes) in eventGroups {
+            var sorted = codes
+            sorted.sort { $0.count > $1.count }
+            eventGroupArray.append(.init(eventType: etype, codes: sorted))
+        }
+        eventGroupArray.sort { $0.eventType < $1.eventType }
+
+        return CohortProfile(attributes: attributeGroups, events: eventGroupArray)
+    }
+
+    // Convert cohort profile from internal representation to API result
+    private func makeAPICohortProfile(_ p: CohortProfile) -> Components.Schemas.CohortProfile {
+        let attrGroups = p.attributes.map { ag in
+            Components.Schemas.AttributeGroup(
+                attribute: ag.attribute,
+                values: ag.values.map { Components.Schemas.KeyCount(key: $0.key, count: $0.count) }
+            )
+        }
+        let evtGroups = p.events.map { eg in
+            Components.Schemas.EventGroup(
+                eventType: eg.eventType,
+                codes: eg.codes.map { Components.Schemas.KeyCount(key: $0.key, count: $0.count) }
+            )
+        }
+        return Components.Schemas.CohortProfile(attributes: attrGroups, events: evtGroups)
     }
 }
 
