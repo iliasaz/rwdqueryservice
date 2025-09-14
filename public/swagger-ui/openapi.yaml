@@ -38,6 +38,14 @@ paths:
             default: true
           description: >
             If true, only return the count of matching patients. This is the default.
+        # ADD: profile flag
+        - in: query
+          name: profile
+          schema:
+            type: boolean
+            default: false
+          description: >
+            If true, compute and return cohortProfile (group-by counts for demographics and included event codes).
       requestBody:
         required: true
         content:
@@ -78,6 +86,7 @@ paths:
                   value:
                     code: "InvalidRequest"
                     message: "Missing required field 'attributes' or 'events'"
+
   /attributes:
     get:
       summary: List available patient attributes
@@ -459,6 +468,55 @@ components:
           description: List of matching patient IDs (omitted if countOnly=true).
           items:
             type: string
+        # ADD: optional cohortProfile
+        cohortProfile:
+          $ref: '#/components/schemas/CohortProfile'
+
+    # ADD: Cohort profiling schemas
+    CohortProfile:
+      type: object
+      description: Group-by counts for demographics attributes and included event codes within the cohort.
+      properties:
+        attributes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttributeGroup'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventGroup'
+
+    AttributeGroup:
+      type: object
+      description: Group-by counts for a single attribute.
+      properties:
+        attribute:
+          type: string
+          description: Attribute name (e.g., gender, race).
+        values:
+          type: array
+          items:
+            $ref: '#/components/schemas/KeyCount'
+
+    EventGroup:
+      type: object
+      description: Group-by counts for a single event type (conditionCode, medicationCode, procedureCode).
+      properties:
+        eventType:
+          type: string
+        codes:
+          type: array
+          items:
+            $ref: '#/components/schemas/KeyCount'
+
+    KeyCount:
+      type: object
+      description: A key and its count within the cohort.
+      properties:
+        key:
+          type: string
+        count:
+          type: integer
 
     ErrorResponse:
       type: object

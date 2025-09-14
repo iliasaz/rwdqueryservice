@@ -38,11 +38,12 @@ struct APIImplementation: APIProtocol {
     /// /query
     func queryPatients(_ input: AppAPI.Operations.QueryPatients.Input) async throws -> AppAPI.Operations.QueryPatients.Output {
         let countOnly = input.query.countOnly ?? true
+        let profile = input.query.profile ?? false
         
         let inputBody = input.body
         switch inputBody {
             case .json(let queryRequest):
-                let queryResults = queryEngine.queryFromPayload(queryRequest: queryRequest, countOnly: countOnly)
+                let queryResults = queryEngine.queryFromPayload(queryRequest: queryRequest, countOnly: countOnly, profile: profile)
                 return .ok(.init(body: .json(queryResults)))
         }
     }
