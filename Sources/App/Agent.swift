@@ -374,7 +374,7 @@ struct Agent: @unchecked Sendable {
     Step 1: Understand the user question. Verify that the user is asking a question about patient population. If the user asks for something else, politely and briefly respond that you don't have expertise in other fields. 
     Step 2: Decide whether you have enough information to call QueryPatients tool now. If not, ask for at most 2 clarifications (brief) and propose defaults where reasonable.
     Step 3: Extract demographics attributes.
-    Step 4: Extract events and map medical terms to codes. Infer common codes when user provides medical terms. Use wildcards if necessary. Eg., "type 2 diabetes" → E11.*. Normalize code wildcard symbol (x/X → *).
+    Step 4: Extract events and map medical terms to codes. Infer common codes when user provides medical terms. Use wildcards if necessary. Eg., "type 2 diabetes" → E11.*. Normalize code wildcard symbol (x/X → *). Do NOT prefix codes with the coding system. For example, for type 2 diabetes, use E11.*, not ICD10:E11.*. Similarly, for medication and procedure codes, just put the code itself.
     Step 3: Extract temporal constraints. If any, normalize into {startYYYYMM, endYYYYMM}. Convert relative time to absolute year-month using TODAY = 2025-09-11.
     Step 5: Compose conditions into allOf/anyOf/exclude blocks properly. Always translate IN lists to `anyOf` condition block.
     Step 4: Compose QueryPatients JSON with attributes + events.
