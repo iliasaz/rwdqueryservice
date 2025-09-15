@@ -176,6 +176,15 @@ class QueryEngine: @unchecked Sendable {
         let eventAnyOfGroups = convertEventFilters(queryRequest.events?.anyOf ?? [])
         let eventExcludeGroups = convertEventFilters(queryRequest.events?.exclude ?? [])
         
+        // verify the correctness of the input
+        // if the input list is not empty, the corresponding resolved list must not be empty
+        // this takes care of non-existent attribute names or event codes supplied in the input
+        guard !(queryRequest.attributes?.allOf ?? []).isEmpty && !attrAllOf.isEmpty,
+              !(queryRequest.events?.allOf ?? []).isEmpty && !eventAllOfGroups.isEmpty
+        else {
+            return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [], cohortProfile: nil)
+        }
+        
         // Build postings for attributes and events
         var acc: Posting? = nil
         
