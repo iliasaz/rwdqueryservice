@@ -348,8 +348,8 @@ struct Agent: @unchecked Sendable {
     Attribute `state` has abbreviated US states, eg. AZ, CA, TX, and etc. 
     Attribute yearOfBirth just a 4-digit year of birht, eg. 1948, 2005, and etc.
     
-      - Patient Events such as diagnoses, procedures, medications. Events are codifed with one or more common ontologies like ICD10, Multum, CPT. Pass the event code type in the `attr` property. Allowed values for 'attr' property in `events` object are: conditionCode, medicationCode, procedureCode. The user input may have a mixture of codified values like ICD10 codes for diagnosis (eg. E11.*), Multum codes for drugs as well as spelled out or abbreviated medical terms. You must substitute the terms with the corresponding codes based on your best judgment. Use the wildcard '*' symbol at the end of the code whenever applicable.
-        
+      - Patient Events such as diagnoses, procedures, medications. Pass the event code type in the `attr` property. Allowed values for 'attr' property in `events` object are: conditionCode, medicationCode, procedureCode. Events are codifed with one or more common ontologies like ICD10 for conditions and diagnoses, RxNorm for medications (drugs), CPT for procedures. The user input may have a mixture of codified values like ICD10 codes for diagnosis (eg. E11.*), RxNorm codes for drugs and medications and CPT code for procedures as well as spelled out or abbreviated medical terms. You must substitute the terms with the corresponding codes based on your best judgment. Use the wildcard '*' symbol at the end of the code whenever applicable. Do NOT include the ontology name in the code. 
+           
     The events may also include a date range expressed as startYYYYMM and endYYYYMM values in YYYYMM (year and month) format. For example, a user ias asking about patients diagnosed with asthma in the past 2 years.
     
     User: "Patients diagnosed with asthma in the past 2 years"
@@ -374,7 +374,7 @@ struct Agent: @unchecked Sendable {
     Step 1: Understand the user question. Verify that the user is asking a question about patient population. If the user asks for something else, politely and briefly respond that you don't have expertise in other fields. 
     Step 2: Decide whether you have enough information to call QueryPatients tool now. If not, ask for at most 2 clarifications (brief) and propose defaults where reasonable.
     Step 3: Extract demographics attributes.
-    Step 4: Extract events and map medical terms to codes. Infer common codes when user provides medical terms. Use wildcards if necessary. Eg., "type 2 diabetes" → E11.*. Normalize code wildcard symbol (x/X → *). Do NOT prefix codes with the coding system. For example, for type 2 diabetes, use E11.*, not ICD10:E11.*. Similarly, for medication and procedure codes, just put the code itself.
+    Step 4: Extract events and map medical terms to codes. Infer common codes when user provides medical terms. Use wildcards if necessary. Eg., "type 2 diabetes" → E11.*. Normalize code wildcard symbol (x/X → *). Do NOT prefix codes with the coding system. For example, for type 2 diabetes, use E11.*, not ICD10:E11.*. For medicationCode use RxNorm codes directly, eg., for ibuprofen use 5640, not RxNorm:5640. For procedures use CPT codes directly. eg., for kidney transplant use 50320, not CPT:50320.
     Step 3: Extract temporal constraints. If any, normalize into {startYYYYMM, endYYYYMM}. Convert relative time to absolute year-month using TODAY = 2025-09-11.
     Step 5: Compose conditions into allOf/anyOf/exclude blocks properly. Always translate IN lists to `anyOf` condition block.
     Step 4: Compose QueryPatients JSON with attributes + events.
