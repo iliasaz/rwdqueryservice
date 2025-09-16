@@ -13,6 +13,7 @@ class QueryEngine: @unchecked Sendable {
     let index = PeopleIndex()
     let dict = DictionaryEncoder()
     let store = IndexStore()
+    private(set) var multumMap = [String: [String]]()
     let logger: Logger
     
     private(set) var patientCount = 0
@@ -31,6 +32,46 @@ class QueryEngine: @unchecked Sendable {
         patientCount = index.universeSize
         index.enumerateValuePostings { a, p in factCount += p.count }
         index.enumerateYearPostings { _, p in factCount += p.count }
+    }
+    
+    func loadMultumMap(from fileURL: URL) throws {
+        multumMap = [:]
+        logger.debug("loading multum from \(fileURL.absoluteString)")
+        let data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+        guard var text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .ascii) else {
+            return
+        }
+
+        text = text.replacingOccurrences(of: "\r\n", with: "\n")
+                   .replacingOccurrences(of: "\r", with: "\n")
+
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+
+        var start = 0
+        if let first = lines.first, first.lowercased().contains("rxnorm_code") {
+            start = 1
+        }
+
+        multumMap.reserveCapacity(max(0, lines.count - start))
+
+        for i in start..<lines.count {
+            let rawLine = lines[i]
+            let trimmedLine = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedLine.isEmpty { continue }
+
+            let parts = trimmedLine.split(separator: ",", maxSplits: 1, omittingEmptySubsequences: false)
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "\"")) }
+
+            guard parts.count == 2 else { continue }
+
+            let rx = parts[0]
+            let multum = parts[1]
+            if rx.isEmpty || multum.isEmpty { continue }
+
+            if multumMap[rx]?.contains(multum) != true {
+                multumMap[rx, default: []].append(multum)
+            }
+        }
     }
     
     // Helper function to convert attribute filters to [AttrVal]
@@ -98,12 +139,24 @@ class QueryEngine: @unchecked Sendable {
                 }
             } else {
                 // Exact code
-                if let valId = dict.valueToID[attrId]?[filter.value] {
-                    if let start = filter.startYYYYMM, let end = filter.endYYYYMM {
-                        let months = expandMonthRange(from: start, to: end)
-                        group.years.append(contentsOf: makeAttrValYears(attrId: attrId, val: valId, months: months))
-                    } else {
-                        group.values.append(AttrVal(attr: attrId, val: valId))
+                // Map RxNorm codes to Multum codes for procedures
+                var codesToUse = [filter.value]
+                if filter.attr == .medicationCode, let mapped = multumMap[filter.value], !mapped.isEmpty {
+                    codesToUse = mapped
+                }
+
+                if let start = filter.startYYYYMM, let end = filter.endYYYYMM {
+                    let months = expandMonthRange(from: start, to: end)
+                    for code in codesToUse {
+                        if let valId = dict.valueToID[attrId]?[code] {
+                            group.years.append(contentsOf: makeAttrValYears(attrId: attrId, val: valId, months: months))
+                        }
+                    }
+                } else {
+                    for code in codesToUse {
+                        if let valId = dict.valueToID[attrId]?[code] {
+                            group.values.append(AttrVal(attr: attrId, val: valId))
+                        }
                     }
                 }
             }
@@ -179,8 +232,10 @@ class QueryEngine: @unchecked Sendable {
         // verify the correctness of the input
         // if the input list is not empty, the corresponding resolved list must not be empty
         // this takes care of non-existent attribute names or event codes supplied in the input
-        guard !(queryRequest.attributes?.allOf ?? []).isEmpty && !attrAllOf.isEmpty,
-              !(queryRequest.events?.allOf ?? []).isEmpty && !eventAllOfGroups.isEmpty
+        guard !(queryRequest.attributes?.allOf ?? []).isEmpty && !attrAllOf.isEmpty || (queryRequest.attributes?.allOf ?? []).isEmpty,
+              !(queryRequest.events?.allOf ?? []).isEmpty && !eventAllOfGroups.isEmpty || (queryRequest.events?.allOf ?? []).isEmpty,
+              !(queryRequest.attributes?.anyOf ?? []).isEmpty && !attrAnyOf.isEmpty || (queryRequest.attributes?.anyOf ?? []).isEmpty,
+              !(queryRequest.events?.anyOf ?? []).isEmpty && !eventAnyOfGroups.isEmpty || (queryRequest.events?.anyOf ?? []).isEmpty
         else {
             return Components.Schemas.QueryResults(count: 0, patients: countOnly ? nil : [], cohortProfile: nil)
         }
@@ -306,24 +361,74 @@ class QueryEngine: @unchecked Sendable {
         let allValues = Array(vmap.keys)
         let prefixMatches = allValues.filter { $0.lowercased().hasPrefix(key) }.sorted()
 
-        let matches: [String]
+        let matchesBase: [String]
         if matchMode == "contains" {
             let substrMatches = allValues.filter { val in
                 let lower = val.lowercased()
                 return lower.contains(key) && !lower.hasPrefix(key)
             }.sorted()
-            matches = prefixMatches + substrMatches
+            matchesBase = prefixMatches + substrMatches
         } else {
-            matches = prefixMatches
+            matchesBase = prefixMatches
+        }
+        
+        var finalMatches = matchesBase
+        
+        // For medicationCode, also search:
+        // 1) RxNorm keys in multumMap (original codes)
+        // 2) Their mapped Multum codes
+        if eventType == "medicationCode" {
+            let rxKeys = Array(multumMap.keys)
+            
+            let rxPrefix = rxKeys.filter { $0.lowercased().hasPrefix(key) }.sorted()
+            let rxContains: [String]
+            if matchMode == "contains" {
+                rxContains = rxKeys.filter { val in
+                    let lower = val.lowercased()
+                    return lower.contains(key) && !lower.hasPrefix(key)
+                }.sorted()
+            } else {
+                rxContains = []
+            }
+            let rxAllOrdered = rxPrefix + rxContains
+            
+            var mappedCodes: [String] = []
+            mappedCodes.reserveCapacity(rxAllOrdered.count)
+            for rx in rxAllOrdered {
+                if let mapped = multumMap[rx] {
+                    mappedCodes.append(contentsOf: mapped)
+                }
+            }
+            
+            let mappedPrefix = mappedCodes.filter { $0.lowercased().hasPrefix(key) }.sorted()
+            let mappedContains: [String]
+            if matchMode == "contains" {
+                mappedContains = mappedCodes.filter { val in
+                    let lower = val.lowercased()
+                    return lower.contains(key) && !lower.hasPrefix(key)
+                }.sorted()
+            } else {
+                mappedContains = []
+            }
+            
+            // Merge while preserving order and removing duplicates
+            var seen = Set<String>(finalMatches)
+            for group in [rxPrefix, rxContains, mappedPrefix, mappedContains] {
+                for v in group where !seen.contains(v) {
+                    finalMatches.append(v)
+                    seen.insert(v)
+                }
+            }
         }
 
+
         // Paging
-        let total = matches.count
+        let total = finalMatches.count
         let safeLimit = max(1, min(limit, 100))
         let safeOffset = max(0, offset)
         let start = min(safeOffset, total)
         let end = min(start + safeLimit, total)
-        let page = (start < end) ? Array(matches[start..<end]) : []
+        let page = (start < end) ? Array(finalMatches[start..<end]) : []
         return (page, total)
     }
 

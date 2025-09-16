@@ -19,6 +19,7 @@ typealias AppRequestContext = BasicRequestContext
 enum AppErrors: Error {
     case invalidIndexFilePath
     case invalidOpenAIKeyPath
+    case invalidMultumMapFilePath
 }
 
 ///  Build application
@@ -45,6 +46,16 @@ public func buildApplication(_ arguments: some AppArguments) async throws -> som
     logger.info("Loading index")
     try queryEngine.loadIndex(from: indexFileUrl)
     logger.info("Loading index complete")
+    
+    // Load drug map
+    guard let multumMapFilePath = environment.get("MULTUM_MAP_FILE_PATH") else {
+        logger.error("MULTUM_MAP_FILE_PATH environment variable is invalid")
+        throw AppErrors.invalidMultumMapFilePath
+    }
+    let multumMapFileUrl = URL(fileURLWithPath: multumMapFilePath)
+    logger.info("Loading Multum Map")
+    try queryEngine.loadMultumMap(from: multumMapFileUrl)
+    logger.info("Loading Multum Map complete")
     
     // add Agent
     let openaiApiKey: String
