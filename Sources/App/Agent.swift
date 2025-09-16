@@ -27,7 +27,7 @@ struct Agent: @unchecked Sendable {
     
     init(apiKey: String, queryEngine: QueryEngine, logger: Logger) {
 //        self.openai = OpenAI(apiToken: apiKey)
-        self.openai = OpenAI(configuration: .init(token: apiKey), middlewares: [LoggingMiddleware()])
+        self.openai = OpenAI(configuration: .init(token: apiKey, timeoutInterval: 300), middlewares: [LoggingMiddleware()])
         self.queryEngine = queryEngine
         self.logger = logger
         
