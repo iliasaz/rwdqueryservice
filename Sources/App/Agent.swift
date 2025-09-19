@@ -8,7 +8,13 @@
 import Foundation
 import AppAPI
 import OpenAI
+import Hummingbird
 import Logging
+import OCIKit
+
+enum DeploymentMode: String {
+    case local, cloud
+}
 
 typealias AgentMessage = AppAPI.Components.Schemas.Message
 typealias QueryRequest = AppAPI.Components.Schemas.QueryRequest
@@ -25,31 +31,107 @@ struct Agent: @unchecked Sendable {
     let queryEngine: QueryEngine
     let logger: Logger
     
-    init(apiKey: String, queryEngine: QueryEngine, logger: Logger) {
-//        self.openai = OpenAI(apiToken: apiKey)
-        self.openai = OpenAI(configuration: .init(token: apiKey, timeoutInterval: 300), middlewares: [LoggingMiddleware()])
-        self.queryEngine = queryEngine
+    private var isOCIModel = true
+    
+    init(env: Environment, queryEngine: QueryEngine, logger: Logger) throws {
         self.logger = logger
+
+        // LLM config
+        let deploymentMode = DeploymentMode(rawValue: env.get("DEPLOYMENT_MODE") ?? "local") ?? .local
+        var openAIConfig: OpenAI.Configuration? = nil
+        var ociSigner: OCIKit.Signer? = nil
+        let ociEndpoint = "inference.generativeai.us-chicago-1.oci.oraclecloud.com"
+        switch deploymentMode {
+            case .local:
+                // try OCI mode first
+                if let ociCompartmentOcid = env.get("OCI_COMPARTMENT_OCID") {
+                    let ociConfigDir = env.get("OCI_CONFIG_DIR") ?? "\(NSHomeDirectory())/.oci"
+                    let ociConfigFilePath = ociConfigDir + "/config"
+                    let ociProfileName = env.get("OCI_PROFILE") ?? "DEFAULT"
+                    logger.debug("Config file path: \(ociConfigFilePath), profile name: \(ociProfileName)")
+                    do {
+                        ociSigner = try OCIKit.SecurityTokenSigner(configFilePath: ociConfigFilePath, configName: ociProfileName)
+                        logger.info("Using OCI LLM provider")
+                    } catch {
+                        logger.error("Failed to initialize OCI signer: \(error.localizedDescription)")
+                    }
+                    
+                    openAIConfig = .init(
+                        token: nil,
+                        host: ociEndpoint,
+                        basePath: "/20231130/actions/v1",
+                        timeoutInterval: 300,
+                        customHeaders: ["CompartmentId": ociCompartmentOcid]
+                    )
+                    isOCIModel = true
+                }
+                // fallback to openAI direct if a key is present
+                if ociSigner == nil, let envOpenaiKey = env.get("OPENAI_API_KEY") {
+                    openAIConfig = .init(token: envOpenaiKey, timeoutInterval: 300)
+                    isOCIModel = false
+                    logger.info("Using OpenAI direct LLM provider")
+                }
+            case .cloud:
+                // try OCI mode first
+                if let ociCompartmentOcid = env.get("OCI_COMPARTMENT_OCID") {
+                    do {
+                        ociSigner = try OCIKit.InstancePrincipalSigner()
+                        logger.info("Using OCI LLM provider")
+                    } catch {
+                        logger.error("Failed to initialize OCI signer: \(error.localizedDescription)")
+                    }
+                    
+                    openAIConfig = .init(
+                        token: nil,
+                        host: ociEndpoint,
+                        basePath: "/20231130/actions/v1",
+                        timeoutInterval: 300,
+                        customHeaders: ["CompartmentId": ociCompartmentOcid]
+                    )
+                    isOCIModel = true
+                }
+                // fallback to openAI direct if a key is present
+                if let envOpenaiKey = env.get("OPENAI_API_KEY") {
+                    openAIConfig = .init(token: envOpenaiKey, timeoutInterval: 300)
+                    isOCIModel = false
+                }
+        }
+        guard let openAIConfig else {
+            throw AppErrors.noLLMProvider
+        }
+        
+        if let ociSigner {
+            self.openai = OpenAI(configuration: openAIConfig, middlewares: [OCISignerMiddleware(signer: ociSigner, logger: self.logger), LoggingMiddleware()])
+        } else {
+            self.openai = OpenAI(configuration: openAIConfig, middlewares: [LoggingMiddleware()])
+        }
+        
+        
+        self.queryEngine = queryEngine
         
         // get allowable attribute values from the query engine
-        var tempAttrVals = [String: [String]]()
-        for attrName in AppAPI.Operations.ListAttributeValues.Input.Path.AttrPayload.allCases {
-            if attrName == .state {
-                tempAttrVals[attrName.rawValue, default: []] = ["<list of abbreviated US states, eg. AZ, CA, and etc.>"]
-            } else if attrName == .yearOfBirth {
-                tempAttrVals[attrName.rawValue, default: []] = ["<4-digit year>"]
-            } else {
-                let attrId = queryEngine.dict.attrToID[attrName.rawValue]!
-                tempAttrVals[attrName.rawValue, default: []] = queryEngine.dict.valueToID[attrId]?.keys.map({$0.description}) ?? []
+        if !queryEngine.dict.attrToID.isEmpty {
+            var tempAttrVals = [String: [String]]()
+            for attrName in AppAPI.Operations.ListAttributeValues.Input.Path.AttrPayload.allCases {
+                if attrName == .state {
+                    tempAttrVals[attrName.rawValue, default: []] = ["<list of abbreviated US states, eg. AZ, CA, and etc.>"]
+                } else if attrName == .yearOfBirth {
+                    tempAttrVals[attrName.rawValue, default: []] = ["<4-digit year>"]
+                } else {
+                    let attrId = queryEngine.dict.attrToID[attrName.rawValue]!
+                    tempAttrVals[attrName.rawValue, default: []] = queryEngine.dict.valueToID[attrId]?.keys.map({$0.description}) ?? []
+                }
             }
+            attributeValues = tempAttrVals
+        } else {
+            attributeValues = [:]
         }
-        attributeValues = tempAttrVals
         
         queryRequestSchema =  try! derivedQueryRequestSchema()
         queryTool = FunctionTool(name: "QueryPatients", parameters: queryRequestSchema, strict: false)
         
-        let derivedSchemaStr = (try? derivedQueryRequestSchemaJSONString(prettyPrinted: true)) ?? ""
-        logger.debug("derivedSchema:\n\(derivedSchemaStr)\n\n")
+//        let derivedSchemaStr = (try? derivedQueryRequestSchemaJSONString(prettyPrinted: true)) ?? ""
+//        logger.debug("derivedSchema:\n\(derivedSchemaStr)\n\n")
     }
     
     private let queryRequestSchema: JSONSchema
@@ -91,7 +173,7 @@ struct Agent: @unchecked Sendable {
         do {
             let request = CreateModelResponseQuery(
                 input: makeModelInput(from: context),
-                model: .gpt5,
+                model: isOCIModel ? "openai.gpt-5" : .gpt5,
                 instructions: instructions.replacingOccurrences(of: "[ATTRIBUTE_VALUE_LIST]", with: self.attributeValueList),
                 reasoning: .init(effort: .low),
                 text: .text,
@@ -150,7 +232,7 @@ struct Agent: @unchecked Sendable {
                 // Get concise guidance on results and next steps using the follow-up prompt
                 let request = CreateModelResponseQuery(
                     input: makeFollowupModelInput(from: context, with: agentResponse),
-                    model: .gpt5,
+                    model: isOCIModel ? "openai.gpt-5" : .gpt5,
                     instructions: RESULT_FOLLOWUP,
                     reasoning: .init(effort: .none),
                     text: .text
@@ -395,4 +477,25 @@ struct Agent: @unchecked Sendable {
     - Available Events: conditionCode, medicationCode, procedureCode.
     - Politely ask if the user would like to go on with either option or if they need other help.
     """
+}
+
+
+func testai() async throws -> String {
+    let env = Environment()
+    let logger = {
+        var logger = Logger(label: "rwdqueryservice")
+        logger.logLevel = .debug
+        return logger
+    }()
+    let queryEngine = QueryEngine(logger: logger)
+    let agent = try Agent(env: env, queryEngine: queryEngine, logger: logger)
+    
+    let request = CreateModelResponseQuery(
+        input: .textInput("this is a test, please confirm that you're receving me."),
+        model: "openai.gpt-5",
+        instructions: "You are a helpful AI Assistant.",
+        reasoning: .init(effort: .none)
+    )
+    let result: ResponseObject = try await agent.openai.responses.createResponse(query: request)
+    return result.output.description
 }

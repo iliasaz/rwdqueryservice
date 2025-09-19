@@ -20,6 +20,8 @@ enum AppErrors: Error {
     case invalidIndexFilePath
     case invalidOpenAIKeyPath
     case invalidMultumMapFilePath
+    case noLLMProvider
+    case invalidOCISigner
 }
 
 ///  Build application
@@ -57,18 +59,8 @@ public func buildApplication(_ arguments: some AppArguments) async throws -> som
     try queryEngine.loadMultumMap(from: multumMapFileUrl)
     logger.info("Loading Multum Map complete")
     
-    // add Agent
-    let openaiApiKey: String
-    if let envOpenaiKey = environment.get("OPENAI_API_KEY") {
-        openaiApiKey = envOpenaiKey
-    } else {
-        logger.error("OPENAI_API_KEY environment variable not found")
-         openaiApiKey = "<not used>"
-//        throw AppErrors.invalidOpenAIKeyPath
-    }
-    
     // Register Query Engine, Agent, and add OpenAPI handlers
-    let api = APIImplementation(queryEngine: queryEngine, openaiKey: openaiApiKey, logger: logger)
+    let api = APIImplementation(queryEngine: queryEngine, env: environment, logger: logger)
     try api.registerHandlers(on: router)
     
     let app = Application(
@@ -106,6 +98,10 @@ func buildRouter() throws -> Router<AppRequestContext> {
     router.get("/") { request, context -> Response in
         // This will redirect to "/docs/" with a 308 Permanent Redirect status
         return Response.redirect(to: "/docs/", type: .permanent)
+    }
+    
+    router.get("/testai") { request, context -> String in
+        return try await testai()
     }
     
     return router

@@ -16,6 +16,10 @@ public final class LoggingMiddleware: OpenAIMiddleware {
     public init() {}
     
     public func intercept(request: URLRequest) -> URLRequest {
+        if let headers = request.allHTTPHeaderFields {
+            print("Headers")
+            print(headers)
+        }
         if let body = request.httpBody {
             if
                 let jsonObject = try? JSONSerialization.jsonObject(with: body, options: []),
