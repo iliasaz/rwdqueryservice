@@ -20,6 +20,7 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-numerics", from: "1.1.0"),
         .package(url: "https://github.com/MacPaw/OpenAI.git", branch: "main"),
         .package(url: "https://github.com/jpsim/Yams.git", from: "6.0.1"),
+        .package(url: "https://github.com/iliasaz/oci-swift-sdk.git", branch: "main"),
     ],
     targets: [
         .executableTarget(name: "App",
@@ -34,6 +35,7 @@ let package = Package(
                 .product(name: "SwiftRoaring", package: "SwiftRoaring"),
                 .product(name: "OpenAI", package: "OpenAI"),
                 .product(name: "Yams", package: "Yams"),
+                .product(name: "OCIKit", package: "oci-swift-sdk"),
             ],
             path: "Sources/App"
         ),

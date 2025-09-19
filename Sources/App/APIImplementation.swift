@@ -1,12 +1,13 @@
 import AppAPI
 import OpenAPIRuntime
 import Foundation
+import Hummingbird
 import Logging
 
 // MARK: Implementation of API handlers
 struct APIImplementation: APIProtocol {
     let queryEngine: QueryEngine
-    let openaiKey: String
+    let env: Environment
     let logger: Logger
     
     /// /values/{attr}
@@ -55,7 +56,7 @@ struct APIImplementation: APIProtocol {
         switch body {
             case .json(let payload):
                 let messages = payload.context
-                let agent = Agent(apiKey: openaiKey, queryEngine: queryEngine, logger: logger)
+                let agent = try Agent(env: env, queryEngine: queryEngine, logger: logger)
                 let agentResponse = try await agent.ask(context: messages)
                 return .ok(.init(body: .json(AppAPI.Operations.Ask.Output.Ok.Body.JsonPayload(message: agentResponse))))
         }
