@@ -16,15 +16,19 @@
 #
 
 
+
 #volumes:
 #  db_data:
-
 
 x-shared_environment: &shared_environment
   LOG_LEVEL: ${LOG_LEVEL:-debug}
   INDEX_FILE_PATH: /app/data/prqt.rwdx
   MULTUM_MAP_FILE_PATH: /app/data/multum_mapping.csv
   OPENAI_API_KEY: "put your key here"
+  OCI_CONFIG_DIR: "<~/.oci>"
+  OCI_PROFILE: "<DEFAULT>"
+  DEPLOYMENT_MODE: "<cloud, local>"
+  OCI_COMPARTMENT_OCID: "<genAI compartment OCID>"
 services:
   app:
     image: rwdqueryservice:latest
