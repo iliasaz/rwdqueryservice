@@ -27,7 +27,7 @@ x-shared_environment: &shared_environment
   OPENAI_API_KEY: "put your key here"
   OCI_CONFIG_DIR: "<~/.oci>"
   OCI_PROFILE: "<DEFAULT>"
-  DEPLOYMENT_MODE: "<cloud, local>"
+  DEPLOYMENT_MODE: "<openai, genaiSessionAuth, genaiInstanceAuth>"
   OCI_COMPARTMENT_OCID: "<genAI compartment OCID>"
 services:
   app:

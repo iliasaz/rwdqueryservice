@@ -18,10 +18,13 @@ typealias AppRequestContext = BasicRequestContext
 
 enum AppErrors: Error {
     case invalidIndexFilePath
-    case invalidOpenAIKeyPath
+    case missingOpenAIKey
     case invalidMultumMapFilePath
     case noLLMProvider
     case invalidOCISigner
+    case missingOCICompartment
+    case sessionTokenSignerFailed
+    case instancePrincipalSignerFailed
 }
 
 ///  Build application

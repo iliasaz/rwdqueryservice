@@ -13,7 +13,7 @@ import Logging
 import OCIKit
 
 enum DeploymentMode: String {
-    case local, cloud
+    case openai, genaiSessionAuth, genaiInstanceAuth
 }
 
 typealias AgentMessage = AppAPI.Components.Schemas.Message
@@ -31,71 +31,83 @@ struct Agent: @unchecked Sendable {
     let queryEngine: QueryEngine
     let logger: Logger
     
-    private var isOCIModel = true
+    private var isUsingGenai = true
     
     init(env: Environment, queryEngine: QueryEngine, logger: Logger) throws {
         self.logger = logger
 
         // LLM config
-        let deploymentMode = DeploymentMode(rawValue: env.get("DEPLOYMENT_MODE") ?? "local") ?? .local
+        let deploymentMode = DeploymentMode(rawValue: env.get("DEPLOYMENT_MODE") ?? "openai") ?? .openai
         var openAIConfig: OpenAI.Configuration? = nil
         var ociSigner: OCIKit.Signer? = nil
         let ociEndpoint = "inference.generativeai.us-chicago-1.oci.oraclecloud.com"
         switch deploymentMode {
-            case .local:
-                // try OCI mode first
-                if let ociCompartmentOcid = env.get("OCI_COMPARTMENT_OCID") {
-                    let ociConfigDir = env.get("OCI_CONFIG_DIR") ?? "\(NSHomeDirectory())/.oci"
-                    let ociConfigFilePath = ociConfigDir + "/config"
-                    let ociProfileName = env.get("OCI_PROFILE") ?? "DEFAULT"
-                    logger.debug("Config file path: \(ociConfigFilePath), profile name: \(ociProfileName)")
-                    do {
-                        ociSigner = try OCIKit.SecurityTokenSigner(configFilePath: ociConfigFilePath, configName: ociProfileName)
-                        logger.info("Using OCI LLM provider")
-                    } catch {
-                        logger.error("Failed to initialize OCI signer: \(error.localizedDescription)")
-                    }
-                    
-                    openAIConfig = .init(
-                        token: nil,
-                        host: ociEndpoint,
-                        basePath: "/20231130/actions/v1",
-                        timeoutInterval: 300,
-                        customHeaders: ["CompartmentId": ociCompartmentOcid]
-                    )
-                    isOCIModel = true
+            case .genaiSessionAuth:
+                // Using GenAI with session auth
+                guard let ociCompartmentOcid = env.get("OCI_COMPARTMENT_OCID") else {
+                    throw AppErrors.missingOCICompartment
                 }
-                // fallback to openAI direct if a key is present
-                if ociSigner == nil, let envOpenaiKey = env.get("OPENAI_API_KEY") {
-                    openAIConfig = .init(token: envOpenaiKey, timeoutInterval: 300)
-                    isOCIModel = false
-                    logger.info("Using OpenAI direct LLM provider")
+                let ociConfigDir = env.get("OCI_CONFIG_DIR") ?? "\(NSHomeDirectory())/.oci"
+                let ociConfigFilePath = ociConfigDir + "/config"
+                let ociProfileName = env.get("OCI_PROFILE") ?? "DEFAULT"
+                logger.debug("Config file path: \(ociConfigFilePath), profile name: \(ociProfileName)")
+                
+                // create a session token signer
+                do {
+                    ociSigner = try OCIKit.SecurityTokenSigner(configFilePath: ociConfigFilePath, configName: ociProfileName)
+                    logger.info("SecurityTokenSigner initialized")
+                } catch {
+                    logger.error("Failed to initialize SecurityTokenSigner signer: \(error.localizedDescription)")
+                    throw AppErrors.sessionTokenSignerFailed
                 }
-            case .cloud:
-                // try OCI mode first
-                if let ociCompartmentOcid = env.get("OCI_COMPARTMENT_OCID") {
-                    do {
-                        ociSigner = try OCIKit.InstancePrincipalSigner()
-                        logger.info("Using OCI LLM provider")
-                    } catch {
-                        logger.error("Failed to initialize OCI signer: \(error.localizedDescription)")
-                    }
-                    
-                    openAIConfig = .init(
-                        token: nil,
-                        host: ociEndpoint,
-                        basePath: "/20231130/actions/v1",
-                        timeoutInterval: 300,
-                        customHeaders: ["CompartmentId": ociCompartmentOcid]
-                    )
-                    isOCIModel = true
+                
+                // create openAI config for genAI
+                openAIConfig = .init(
+                    token: nil,
+                    host: ociEndpoint,
+                    basePath: "/20231130/actions/v1",
+                    timeoutInterval: 300,
+                    customHeaders: ["CompartmentId": ociCompartmentOcid]
+                )
+                isUsingGenai = true
+                logger.info("Using GenAI LLM provider with session token auth")
+
+            case .openai:
+                // Using OpenAI direc API key
+                guard let envOpenaiKey = env.get("OPENAI_API_KEY") else {
+                    throw AppErrors.missingOpenAIKey
                 }
-                // fallback to openAI direct if a key is present
-                if let envOpenaiKey = env.get("OPENAI_API_KEY") {
-                    openAIConfig = .init(token: envOpenaiKey, timeoutInterval: 300)
-                    isOCIModel = false
+                openAIConfig = .init(token: envOpenaiKey, timeoutInterval: 300)
+                isUsingGenai = false
+                logger.info("Using OpenAI direct LLM provider")
+            
+            case .genaiInstanceAuth:
+                // Using GenAI with InstancePrincipal auth
+                guard let ociCompartmentOcid = env.get("OCI_COMPARTMENT_OCID") else {
+                    throw AppErrors.missingOCICompartment
                 }
+                
+                // create an instance principal signer
+                do {
+                    ociSigner = try OCIKit.InstancePrincipalSigner()
+                    logger.info("InstancePrincipalSigner initialized")
+                } catch {
+                    logger.error("Failed to initialize InstancePrincipalSigner signer: \(error.localizedDescription)")
+                    throw AppErrors.instancePrincipalSignerFailed
+                }
+                
+                // create openAI config for genAI
+                openAIConfig = .init(
+                    token: nil,
+                    host: ociEndpoint,
+                    basePath: "/20231130/actions/v1",
+                    timeoutInterval: 300,
+                    customHeaders: ["CompartmentId": ociCompartmentOcid]
+                )
+                isUsingGenai = true
+                logger.info("Using GenAI LLM provider with instance principal auth")
         }
+        
         guard let openAIConfig else {
             throw AppErrors.noLLMProvider
         }
@@ -105,7 +117,6 @@ struct Agent: @unchecked Sendable {
         } else {
             self.openai = OpenAI(configuration: openAIConfig, middlewares: [LoggingMiddleware()])
         }
-        
         
         self.queryEngine = queryEngine
         
@@ -173,7 +184,7 @@ struct Agent: @unchecked Sendable {
         do {
             let request = CreateModelResponseQuery(
                 input: makeModelInput(from: context),
-                model: isOCIModel ? "openai.gpt-5" : .gpt5,
+                model: isUsingGenai ? "openai.gpt-5" : .gpt5,
                 instructions: instructions.replacingOccurrences(of: "[ATTRIBUTE_VALUE_LIST]", with: self.attributeValueList),
                 reasoning: .init(effort: .low),
                 text: .text,
@@ -232,7 +243,7 @@ struct Agent: @unchecked Sendable {
                 // Get concise guidance on results and next steps using the follow-up prompt
                 let request = CreateModelResponseQuery(
                     input: makeFollowupModelInput(from: context, with: agentResponse),
-                    model: isOCIModel ? "openai.gpt-5" : .gpt5,
+                    model: isUsingGenai ? "openai.gpt-5" : .gpt5,
                     instructions: RESULT_FOLLOWUP,
                     reasoning: .init(effort: .none),
                     text: .text

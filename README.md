@@ -27,7 +27,7 @@ OPENAI_API_KEY=<optionally provide API key>
 MULTUM_MAP_FILE_PATH=<path to multum_mapping.csv file>
 OCI_CONFIG_DIR=<OCI config directory, usually ~/.oci, this is used for local development>
 OCI_PROFILE=<OCI profile name>
-DEPLOYMENT_MODE=<local - for development, uses OCI session auth; cloud - for deployment on OCI VM, uses Instance Principal auth>
+DEPLOYMENT_MODE=<openai for using direct API key, genaiSessionAuth for using GenAI service with session token auth, genaiInstanceAuth for using GenAI service with Instance Principal auth>
 OCI_COMPARTMENT_OCID=<compartment OCID for GenAI>
 
 ### On Linux
