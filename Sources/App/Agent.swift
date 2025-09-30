@@ -31,10 +31,15 @@ struct Agent: @unchecked Sendable {
     let queryEngine: QueryEngine
     let logger: Logger
     
+    private let countOnly: Bool
+    private let withProfile: Bool
+    
     private var isUsingGenai = true
     
-    init(env: Environment, queryEngine: QueryEngine, logger: Logger) throws {
+    init(env: Environment, queryEngine: QueryEngine, logger: Logger, countOnly: Bool = true, withProfile: Bool = false) throws {
         self.logger = logger
+        self.countOnly = countOnly
+        self.withProfile = withProfile
 
         // LLM config
         let deploymentMode = DeploymentMode(rawValue: env.get("DEPLOYMENT_MODE") ?? "openai") ?? .openai
@@ -216,7 +221,7 @@ struct Agent: @unchecked Sendable {
                                 break
                             }
                             let queryRequest = try JSONDecoder().decode(QueryRequest.self, from: argData)
-                            let queryResults = queryEngine.queryFromPayload(queryRequest: queryRequest, countOnly: true)
+                            let queryResults = queryEngine.queryFromPayload(queryRequest: queryRequest, countOnly: self.countOnly, profile: self.withProfile)
                             agentResponse.proposedQuery = queryRequest
                             agentResponse.queryResults = queryResults
                             logger.debug("query results: \(queryResults)")

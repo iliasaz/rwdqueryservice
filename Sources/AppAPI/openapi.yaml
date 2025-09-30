@@ -183,6 +183,22 @@ paths:
         The agent interprets the request, may ask clarifying questions, and can execute structured queries internally.  
         Multi-turn interactions are supported by passing the conversation context, where the last `user` message is treated as the new input.
       operationId: ask
+      parameters:
+        - in: query
+          name: countOnly
+          schema:
+            type: boolean
+            default: true
+          description: >
+            If true, only return the count of matching patients. This is the default.
+        # ADD: profile flag
+        - in: query
+          name: profile
+          schema:
+            type: boolean
+            default: false
+          description: >
+            If true, compute and return cohortProfile (group-by counts for demographics and included event codes).
       requestBody:
         required: true
         content:

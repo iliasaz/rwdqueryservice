@@ -52,11 +52,13 @@ struct APIImplementation: APIProtocol {
     /// /ask
     func ask(_ input: AppAPI.Operations.Ask.Input) async throws -> AppAPI.Operations.Ask.Output {
         let conversationId = "mock-conversation-001"
+        let countOnly = input.query.countOnly ?? true
+        let profile = input.query.profile ?? false
         let body = input.body
         switch body {
             case .json(let payload):
                 let messages = payload.context
-                let agent = try Agent(env: env, queryEngine: queryEngine, logger: logger)
+                let agent = try Agent(env: env, queryEngine: queryEngine, logger: logger, countOnly: countOnly, withProfile: profile)
                 let agentResponse = try await agent.ask(context: messages)
                 return .ok(.init(body: .json(AppAPI.Operations.Ask.Output.Ok.Body.JsonPayload(message: agentResponse))))
         }
